@@ -1,13 +1,12 @@
 import { PrismaClient } from "@prisma/client";
-import { createHash } from "crypto";
-import { readdir, stat, readFile, access, unlink } from "fs/promises";
-import { join, relative, extname, basename, dirname } from "path";
+import { readdir, stat, access, mkdir, writeFile } from "fs/promises";
+import { join, relative, extname, basename } from "path";
 import sharp from "sharp";
 import mime from "mime-types";
 import { constants } from "fs";
-import chokidar from "chokidar";
 import { exec } from "child_process";
 import { promisify } from "util";
+import { createHash } from "crypto";
 
 const execAsync = promisify(exec);
 const prisma = new PrismaClient();
@@ -18,7 +17,7 @@ const THUMB_DIR = join(CACHE_ROOT, "thumbnails");
 const PREVIEW_DIR = join(CACHE_ROOT, "previews");
 const TEMP_DIR = join(CACHE_ROOT, "temp");
 
-// Directories to permanently ignore — OS metadata
+// Directories to permanently ignore — OS metadata and upload staging
 const IGNORED_DIRS = new Set([
   "$RECYCLE.BIN",
   "System Volume Information",
@@ -29,11 +28,17 @@ const IGNORED_DIRS = new Set([
   ".DS_Store",
   "RECYCLER",
   "FOUND.000",
+  // Upload pipeline staging dir — files here are mid-transfer, not complete
+  ".tmp-upload",
 ]);
 
 // File extensions for which we generate thumbnails/previews
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".heic", ".gif", ".avif"]);
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm"]);
+
+// ---------------------------------------------------------------------------
+// Logging
+// ---------------------------------------------------------------------------
 
 function log(level: "INFO" | "WARN" | "ERROR", msg: string, data?: unknown) {
   const ts = new Date().toISOString();
@@ -41,6 +46,10 @@ function log(level: "INFO" | "WARN" | "ERROR", msg: string, data?: unknown) {
   if (data) console.log(entry, JSON.stringify(data));
   else console.log(entry);
 }
+
+// ---------------------------------------------------------------------------
+// Scanner status
+// ---------------------------------------------------------------------------
 
 async function updateScannerStatus(status: string) {
   await prisma.systemStatus.upsert({
@@ -50,25 +59,34 @@ async function updateScannerStatus(status: string) {
   });
 }
 
-async function sha256(filePath: string): Promise<string> {
-  const data = await readFile(filePath);
-  return createHash("sha256").update(data).digest("hex");
-}
+// ---------------------------------------------------------------------------
+// Cache helpers (write to NVMe /cache only — never reads from T7 if cached)
+// ---------------------------------------------------------------------------
 
 async function ensureDir(dir: string) {
-  const { mkdir } = await import("fs/promises");
   await mkdir(dir, { recursive: true });
 }
 
-// Generate 320x320 thumbnail
+// Returns relative cache path like "thumbnails/<hash>.webp", or null on permanent failure.
+//
+// Fast-path order (all on NVMe — never touches /media):
+//   1. .webp exists → return it immediately
+//   2. .failed sentinel exists → a previous attempt failed; skip permanently
+//   3. Neither → open the file from /media and attempt generation
+//
+// On any generation error a zero-byte .failed sentinel is written to NVMe.
+// All future scans will hit fast-path #2 and skip the file without ever
+// opening it from the SSD, preventing stale mmaps from keeping the T7 awake.
 async function generateThumbnail(absolutePath: string, relativePath: string): Promise<string | null> {
   const hash = createHash("sha256").update(relativePath).digest("hex").slice(0, 16);
-  const thumbPath = join(THUMB_DIR, `${hash}.webp`);
+  const thumbPath    = join(THUMB_DIR, `${hash}.webp`);
+  const failedPath   = join(THUMB_DIR, `${hash}.failed`);
   const thumbRelative = `thumbnails/${hash}.webp`;
-  try {
-    await access(thumbPath, constants.R_OK);
-    return thumbRelative;
-  } catch {}
+
+  // Fast-path 1: thumbnail already cached on NVMe
+  try { await access(thumbPath, constants.R_OK); return thumbRelative; } catch {}
+  // Fast-path 2: previously failed — skip without touching SSD
+  try { await access(failedPath, constants.F_OK); return null; } catch {}
 
   try {
     await ensureDir(THUMB_DIR);
@@ -78,20 +96,23 @@ async function generateThumbnail(absolutePath: string, relativePath: string): Pr
       .toFile(thumbPath);
     return thumbRelative;
   } catch (err) {
-    log("WARN", `Thumbnail failed for ${relativePath}`, { error: String(err) });
+    log("WARN", `Thumbnail failed for ${relativePath} — writing sentinel to skip on future scans`, { error: String(err) });
+    // Sentinel: zero-byte marker so this file is never opened from SSD again
+    await writeFile(failedPath, "").catch(() => {});
     return null;
   }
 }
 
-// Generate 1920x1920 preview
 async function generatePreview(absolutePath: string, relativePath: string): Promise<string | null> {
   const hash = createHash("sha256").update(relativePath).digest("hex").slice(0, 16);
-  const previewPath = join(PREVIEW_DIR, `${hash}.webp`);
+  const previewPath    = join(PREVIEW_DIR, `${hash}.webp`);
+  const failedPath     = join(PREVIEW_DIR, `${hash}.failed`);
   const previewRelative = `previews/${hash}.webp`;
-  try {
-    await access(previewPath, constants.R_OK);
-    return previewRelative;
-  } catch {}
+
+  // Fast-path 1: preview already cached on NVMe
+  try { await access(previewPath, constants.R_OK); return previewRelative; } catch {}
+  // Fast-path 2: previously failed — skip without touching SSD
+  try { await access(failedPath, constants.F_OK); return null; } catch {}
 
   try {
     await ensureDir(PREVIEW_DIR);
@@ -101,48 +122,53 @@ async function generatePreview(absolutePath: string, relativePath: string): Prom
       .toFile(previewPath);
     return previewRelative;
   } catch (err) {
-    log("WARN", `Preview failed for ${relativePath}`, { error: String(err) });
+    log("WARN", `Preview failed for ${relativePath} — writing sentinel to skip on future scans`, { error: String(err) });
+    await writeFile(failedPath, "").catch(() => {});
     return null;
   }
 }
 
-// Generate video poster frame
 async function generateVideoThumbnail(absolutePath: string, relativePath: string): Promise<string | null> {
   const hash = createHash("sha256").update(relativePath).digest("hex").slice(0, 16);
-  const posterPath = join(PREVIEW_DIR, `video-${hash}.webp`);
+  const posterPath     = join(PREVIEW_DIR, `video-${hash}.webp`);
+  const failedPath     = join(PREVIEW_DIR, `video-${hash}.failed`);
   const posterRelative = `previews/video-${hash}.webp`;
-  try {
-    await access(posterPath, constants.R_OK);
-    return posterRelative;
-  } catch {}
+
+  // Fast-path 1: poster already cached on NVMe
+  try { await access(posterPath, constants.R_OK); return posterRelative; } catch {}
+  // Fast-path 2: previously failed — skip without touching SSD
+  try { await access(failedPath, constants.F_OK); return null; } catch {}
 
   try {
     await ensureDir(PREVIEW_DIR);
-    // Extract frame at 1s, scale maintaining aspect ratio within 320x320
-    await execAsync(`ffmpeg -y -ss 1 -i "${absolutePath}" -frames:v 1 -vf "scale='min(320,iw)':'min(320,ih)':force_original_aspect_ratio=decrease" -c:v libwebp -quality 75 "${posterPath}"`);
+    await execAsync(
+      `ffmpeg -y -ss 1 -i "${absolutePath}" -frames:v 1 -vf "scale='min(320,iw)':'min(320,ih)':force_original_aspect_ratio=decrease" -c:v libwebp -quality 75 "${posterPath}"`
+    );
     return posterRelative;
   } catch (err) {
-    log("WARN", `Video thumbnail failed for ${relativePath}`, { error: String(err) });
+    log("WARN", `Video thumbnail failed for ${relativePath} — writing sentinel to skip on future scans`, { error: String(err) });
+    await writeFile(failedPath, "").catch(() => {});
     return null;
   }
 }
 
-async function processFile(absolutePath: string, fileStatObj?: any) {
+// ---------------------------------------------------------------------------
+// File / directory indexing
+// ---------------------------------------------------------------------------
+
+// Indexes one file.  Uses size + mtime for change detection — no SHA-256 full
+// file read.  Only reads from T7 if thumbnail/preview cache needs generating.
+async function processFile(absolutePath: string, fileStatObj?: Awaited<ReturnType<typeof stat>>) {
   const name = basename(absolutePath);
   if (IGNORED_DIRS.has(name) || name.startsWith("._")) return;
   const relativePath = relative(MEDIA_ROOT, absolutePath);
   if (relativePath.includes("/.Trash") || relativePath.includes("/$RECYCLE.BIN")) return;
 
   try {
-    const fileStat = fileStatObj || await stat(absolutePath);
+    const fileStat = fileStatObj ?? await stat(absolutePath);
     const ext = extname(name).toLowerCase();
     const mimeType = mime.lookup(name) || null;
     const modifiedAt = fileStat.mtime;
-
-    let checksum: string | null = null;
-    if (fileStat.size < 500 * 1024 * 1024) {
-      checksum = await sha256(absolutePath);
-    }
 
     const node = await prisma.fileNode.upsert({
       where: { relativePath },
@@ -151,7 +177,6 @@ async function processFile(absolutePath: string, fileStatObj?: any) {
         mimeType: mimeType ?? undefined,
         size: BigInt(fileStat.size),
         modifiedAt,
-        sha256: checksum ?? undefined,
         isVisible: true,
       },
       create: {
@@ -161,7 +186,6 @@ async function processFile(absolutePath: string, fileStatObj?: any) {
         mimeType: mimeType ?? undefined,
         size: BigInt(fileStat.size),
         modifiedAt,
-        sha256: checksum ?? undefined,
         isVisible: true,
       },
     });
@@ -177,11 +201,14 @@ async function processFile(absolutePath: string, fileStatObj?: any) {
         });
       }
       if (previewPath) {
-        const imgMeta = await sharp(absolutePath).metadata();
+        // Read image metadata for dimensions — only needed when creating a new preview
+        const existing = await prisma.preview.findUnique({ where: { fileNodeId: node.id } });
+        const width = existing?.width ?? (await sharp(absolutePath).metadata().catch(() => ({}))).width ?? 0;
+        const height = existing?.height ?? (await sharp(absolutePath).metadata().catch(() => ({}))).height ?? 0;
         await prisma.preview.upsert({
           where: { fileNodeId: node.id },
           update: { cachePath: previewPath },
-          create: { fileNodeId: node.id, cachePath: previewPath, width: imgMeta.width ?? 0, height: imgMeta.height ?? 0 },
+          create: { fileNodeId: node.id, cachePath: previewPath, width, height },
         });
       }
     } else if (VIDEO_EXTENSIONS.has(ext)) {
@@ -190,17 +217,12 @@ async function processFile(absolutePath: string, fileStatObj?: any) {
         await prisma.thumbnail.upsert({
           where: { fileNodeId: node.id },
           update: { cachePath: posterPath },
-          create: {
-            fileNodeId: node.id,
-            cachePath: posterPath,
-            width: 320,
-            height: 320,
-          },
+          create: { fileNodeId: node.id, cachePath: posterPath, width: 320, height: 320 },
         });
       }
     }
   } catch (err) {
-    log("WARN", `Failed to process file: ${relativePath}`, { error: String(err) });
+    log("WARN", `Failed to process file: ${relative(MEDIA_ROOT, absolutePath)}`, { error: String(err) });
   }
 }
 
@@ -208,7 +230,7 @@ async function processDirectory(absolutePath: string) {
   const name = basename(absolutePath);
   if (IGNORED_DIRS.has(name) || name.startsWith("._")) return;
   const relativePath = relative(MEDIA_ROOT, absolutePath);
-  if (!relativePath) return; // Root
+  if (!relativePath) return; // root
 
   try {
     await prisma.fileNode.upsert({
@@ -221,85 +243,68 @@ async function processDirectory(absolutePath: string) {
   }
 }
 
-async function processUnlink(absolutePath: string) {
-  const relativePath = relative(MEDIA_ROOT, absolutePath);
-  try {
-    await prisma.fileNode.deleteMany({ where: { relativePath } });
-  } catch (err) {
-    log("WARN", `Failed to delete file from DB: ${relativePath}`, { error: String(err) });
-  }
-}
-
-async function processUnlinkDir(absolutePath: string) {
-  const relativePath = relative(MEDIA_ROOT, absolutePath);
-  try {
-    // Delete dir and all children
-    await prisma.fileNode.deleteMany({
-      where: {
-        OR: [
-          { relativePath },
-          { relativePath: { startsWith: `${relativePath}/` } }
-        ]
-      }
-    });
-  } catch (err) {
-    log("WARN", `Failed to delete dir from DB: ${relativePath}`, { error: String(err) });
-  }
-}
-
-// -------------------------------------------------------------
-// Manual Full Rescan
-// -------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// FULL_RESCAN: walk /media, index everything, prune deleted
+// ---------------------------------------------------------------------------
 
 async function countFiles(dirPath: string): Promise<number> {
   let count = 0;
-  let lastReportTime = Date.now();
   async function walk(currentPath: string) {
     try {
       const entries = await readdir(currentPath, { withFileTypes: true });
       for (const entry of entries) {
         if (IGNORED_DIRS.has(entry.name) || entry.name.startsWith("._")) continue;
-        if (entry.isDirectory()) {
-          await walk(join(currentPath, entry.name));
-        } else if (entry.isFile()) {
-          count++;
-        }
+        if (entry.isDirectory()) await walk(join(currentPath, entry.name));
+        else if (entry.isFile()) count++;
       }
-    } catch {
-      return;
-    }
+    } catch { return; }
   }
   await walk(dirPath);
   return count;
 }
 
-async function scanDirectory(dirPath: string, isIncremental: boolean = true, jobId: string | null = null): Promise<number> {
+async function scanDirectory(
+  dirPath: string,
+  jobId: string
+): Promise<number> {
   let count = 0;
   let lastReportTime = Date.now();
+
   async function walk(currentPath: string) {
     let entries;
-    try {
-      entries = await readdir(currentPath, { withFileTypes: true });
-    } catch {
-      return;
-    }
+    try { entries = await readdir(currentPath, { withFileTypes: true }); }
+    catch { return; }
+
     for (const entry of entries) {
       if (IGNORED_DIRS.has(entry.name) || entry.name.startsWith("._")) continue;
       const absolutePath = join(currentPath, entry.name);
+
       if (entry.isDirectory()) {
         await processDirectory(absolutePath);
         await walk(absolutePath);
       } else if (entry.isFile()) {
         const fileStat = await stat(absolutePath);
-        if (isIncremental) {
-          const existing = await prisma.fileNode.findUnique({ where: { relativePath: relative(MEDIA_ROOT, absolutePath) } });
-          if (existing && existing.size === BigInt(fileStat.size) && existing.modifiedAt?.getTime() === fileStat.mtime.getTime()) {
-            // File metadata unchanged — but still generate missing cache files (thumbnails/previews)
-            const ext = extname(entry.name).toLowerCase();
-            if (IMAGE_EXTENSIONS.has(ext)) {
-              // Run silently — generateThumbnail/Preview return early if cache already exists
-              const thumbPath = await generateThumbnail(absolutePath, relative(MEDIA_ROOT, absolutePath));
-              const previewPath = await generatePreview(absolutePath, relative(MEDIA_ROOT, absolutePath));
+        const relPath = relative(MEDIA_ROOT, absolutePath);
+        const ext = extname(entry.name).toLowerCase();
+
+        // Change detection: size + mtime only (no SHA-256 full-file read)
+        const existing = await prisma.fileNode.findUnique({
+          where: { relativePath: relPath },
+          include: { thumbnail: true, preview: true },
+        });
+
+        const unchanged =
+          existing &&
+          existing.size === BigInt(fileStat.size) &&
+          existing.modifiedAt?.getTime() === fileStat.mtime.getTime();
+
+        if (unchanged) {
+          // Metadata unchanged. Only generate cache if genuinely missing —
+          // generateThumbnail/Preview return early from NVMe access() check
+          // without touching the T7 when the cache file already exists.
+          if (IMAGE_EXTENSIONS.has(ext)) {
+            if (!existing.thumbnail) {
+              const thumbPath = await generateThumbnail(absolutePath, relPath);
               if (thumbPath && existing.id) {
                 await prisma.thumbnail.upsert({
                   where: { fileNodeId: existing.id },
@@ -307,54 +312,53 @@ async function scanDirectory(dirPath: string, isIncremental: boolean = true, job
                   create: { fileNodeId: existing.id, cachePath: thumbPath, width: 320, height: 320 },
                 }).catch(() => {});
               }
+            }
+            if (!existing.preview) {
+              const previewPath = await generatePreview(absolutePath, relPath);
               if (previewPath && existing.id) {
-                const imgMeta = await sharp(absolutePath).metadata();
+                const imgMeta = await sharp(absolutePath).metadata().catch(() => ({ width: 0, height: 0 }));
                 await prisma.preview.upsert({
                   where: { fileNodeId: existing.id },
                   update: { cachePath: previewPath },
                   create: { fileNodeId: existing.id, cachePath: previewPath, width: imgMeta.width ?? 0, height: imgMeta.height ?? 0 },
                 }).catch(() => {});
               }
-            } else if (VIDEO_EXTENSIONS.has(ext)) {
-              const posterPath = await generateVideoThumbnail(absolutePath, relative(MEDIA_ROOT, absolutePath));
-              if (posterPath && existing.id) {
-                await prisma.thumbnail.upsert({
-                  where: { fileNodeId: existing.id },
-                  update: { cachePath: posterPath },
-                  create: { fileNodeId: existing.id, cachePath: posterPath, width: 320, height: 320 },
-                }).catch(() => {});
-              }
             }
-            continue; // Skip full DB metadata update — file is unchanged
+          } else if (VIDEO_EXTENSIONS.has(ext) && !existing.thumbnail) {
+            const posterPath = await generateVideoThumbnail(absolutePath, relPath);
+            if (posterPath && existing.id) {
+              await prisma.thumbnail.upsert({
+                where: { fileNodeId: existing.id },
+                update: { cachePath: posterPath },
+                create: { fileNodeId: existing.id, cachePath: posterPath, width: 320, height: 320 },
+              }).catch(() => {});
+            }
           }
+        } else {
+          // New or changed file — full index
+          await processFile(absolutePath, fileStat);
         }
-        await processFile(absolutePath, fileStat);
+
         count++;
 
-        // Report progress every 2 seconds during scan
-        if (jobId && Date.now() - lastReportTime > 2000) {
+        // Progress + cancellation check every 2 s
+        if (Date.now() - lastReportTime > 2000) {
           lastReportTime = Date.now();
-          
-          // Check for cancellation
-          const currentJob = await prisma.scanJob.findUnique({ where: { id: jobId }, select: { status: true } }).catch(() => null);
-          if (currentJob && currentJob.status === "CANCELLED") {
-            log(`Scan ${jobId} was cancelled by user`);
-            break;
+          const currentJob = await prisma.scanJob
+            .findUnique({ where: { id: jobId }, select: { status: true } })
+            .catch(() => null);
+          if (currentJob?.status === "CANCELLED") {
+            log("INFO", `Scan ${jobId} was cancelled by user`);
+            return;
           }
-          
-          await prisma.scanJob.update({ where: { id: jobId }, data: { processedFiles: count } }).catch(() => {});
-        }
-      }
-      // Also tick progress for skipped (unchanged) files
-      if (isIncremental) {
-        count++;
-        if (jobId && Date.now() - lastReportTime > 2000) {
-          lastReportTime = Date.now();
-          await prisma.scanJob.update({ where: { id: jobId }, data: { processedFiles: count } }).catch(() => {});
+          await prisma.scanJob
+            .update({ where: { id: jobId }, data: { processedFiles: count } })
+            .catch(() => {});
         }
       }
     }
   }
+
   await walk(dirPath);
   return count;
 }
@@ -363,9 +367,8 @@ async function pruneDeletedFiles() {
   const allNodes = await prisma.fileNode.findMany({ select: { id: true, relativePath: true } });
   let pruned = 0;
   for (const node of allNodes) {
-    try {
-      await access(join(MEDIA_ROOT, node.relativePath), constants.F_OK);
-    } catch {
+    try { await access(join(MEDIA_ROOT, node.relativePath), constants.F_OK); }
+    catch {
       await prisma.fileNode.delete({ where: { id: node.id } });
       pruned++;
     }
@@ -373,31 +376,29 @@ async function pruneDeletedFiles() {
   if (pruned > 0) log("INFO", `Pruned ${pruned} deleted nodes from index`);
 }
 
-async function runFullScan(jobId: string | null) {
-  log("INFO", `Starting FULL scan`, { jobId });
-  let totalFiles = 0;
-  if (jobId) {
-    totalFiles = await countFiles(MEDIA_ROOT);
+async function runFullRescan(jobId: string) {
+  log("INFO", "Starting FULL_RESCAN", { jobId });
+  await updateScannerStatus("scanning");
+
+  try {
+    const totalFiles = await countFiles(MEDIA_ROOT);
     await prisma.scanJob.update({
       where: { id: jobId },
       data: { status: "RUNNING", startedAt: new Date(), totalFiles },
     });
-  }
-  await updateScannerStatus("scanning");
 
-  try {
-    const count = await scanDirectory(MEDIA_ROOT, true, jobId);
+    const count = await scanDirectory(MEDIA_ROOT, jobId);
     await pruneDeletedFiles();
 
-    log("INFO", `Full scan completed`, { filesProcessed: count });
-    if (jobId) await prisma.scanJob.update({
-      where: { id: jobId! },
+    log("INFO", "FULL_RESCAN completed", { filesProcessed: count });
+    await prisma.scanJob.update({
+      where: { id: jobId },
       data: { status: "COMPLETED", completedAt: new Date(), processedFiles: totalFiles || count },
     });
   } catch (err) {
-    log("ERROR", `Scan failed`, { error: String(err) });
-    if (jobId) await prisma.scanJob.update({
-      where: { id: jobId! },
+    log("ERROR", "FULL_RESCAN failed", { error: String(err) });
+    await prisma.scanJob.update({
+      where: { id: jobId },
       data: { status: "FAILED", completedAt: new Date(), error: String(err) },
     });
   } finally {
@@ -405,75 +406,97 @@ async function runFullScan(jobId: string | null) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// INDEX_FILE: index exactly one file (used after internal uploads)
+// Atomic upload pipeline guarantee: the file MUST already be confirmed on the
+// T7 before this job is created.  If the file is missing, the job is FAILED —
+// no DB records or cache files are created for it.
+// ---------------------------------------------------------------------------
+
+async function runIndexFile(jobId: string, targetPath: string) {
+  log("INFO", `Starting INDEX_FILE: ${targetPath}`, { jobId });
+  await updateScannerStatus("indexing");
+
+  try {
+    await prisma.scanJob.update({
+      where: { id: jobId },
+      data: { status: "RUNNING", startedAt: new Date(), totalFiles: 1 },
+    });
+
+    const absolutePath = join(MEDIA_ROOT, targetPath);
+
+    // Defensive check: file must actually exist on the T7.
+    // If it doesn't (upload pipeline failure), we fail the job immediately.
+    try {
+      await access(absolutePath, constants.F_OK);
+    } catch {
+      throw new Error(`Target file does not exist on media: ${targetPath}`);
+    }
+
+    await processFile(absolutePath);
+
+    log("INFO", `INDEX_FILE completed: ${targetPath}`, { jobId });
+    await prisma.scanJob.update({
+      where: { id: jobId },
+      data: { status: "COMPLETED", completedAt: new Date(), processedFiles: 1 },
+    });
+  } catch (err) {
+    log("ERROR", `INDEX_FILE failed: ${targetPath}`, { error: String(err) });
+    await prisma.scanJob.update({
+      where: { id: jobId },
+      data: { status: "FAILED", completedAt: new Date(), error: String(err) },
+    });
+  } finally {
+    await updateScannerStatus("idle");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Job polling loop
+// ---------------------------------------------------------------------------
+
 async function checkForPendingJobs() {
   const job = await prisma.scanJob.findFirst({
     where: { status: "PENDING" },
     orderBy: { requestedAt: "asc" },
   });
-  if (job) {
-    await runFullScan(job.id);
+  if (!job) return;
+
+  if (job.type === "FULL_RESCAN") {
+    await runFullRescan(job.id);
+  } else if (job.type === "INDEX_FILE") {
+    if (!job.targetPath) {
+      log("ERROR", `INDEX_FILE job ${job.id} has no targetPath — marking FAILED`);
+      await prisma.scanJob.update({
+        where: { id: job.id },
+        data: { status: "FAILED", error: "Missing targetPath", completedAt: new Date() },
+      });
+    } else {
+      await runIndexFile(job.id, job.targetPath);
+    }
+  } else {
+    // Unknown job type — should not happen; mark FAILED so it doesn't block
+    log("WARN", `Unknown job type: ${job.type} — marking FAILED`, { jobId: job.id });
+    await prisma.scanJob.update({
+      where: { id: job.id },
+      data: { status: "FAILED", error: `Unknown job type: ${job.type}`, completedAt: new Date() },
+    });
   }
 }
 
-// -------------------------------------------------------------
-// Setup
-// -------------------------------------------------------------
-async function setupWatcher() {
-  log("INFO", "Setting up chokidar watcher on " + MEDIA_ROOT);
-  const watcher = chokidar.watch(MEDIA_ROOT, {
-    persistent: true,
-    ignoreInitial: true,
-    ignored: (path: string) => {
-      const name = basename(path);
-      return IGNORED_DIRS.has(name) || name.startsWith("._");
-    },
-    awaitWriteFinish: {
-      stabilityThreshold: 2000,
-      pollInterval: 100,
-    },
-  });
-
-  watcher
-    .on("add", (path) => {
-      log("INFO", "File added: " + relative(MEDIA_ROOT, path));
-      processFile(path);
-    })
-    .on("change", (path) => {
-      log("INFO", "File changed: " + relative(MEDIA_ROOT, path));
-      processFile(path);
-    })
-    .on("unlink", (path) => {
-      log("INFO", "File removed: " + relative(MEDIA_ROOT, path));
-      processUnlink(path);
-    })
-    .on("addDir", (path) => {
-      log("INFO", "Dir added: " + relative(MEDIA_ROOT, path));
-      processDirectory(path);
-    })
-    .on("unlinkDir", (path) => {
-      log("INFO", "Dir removed: " + relative(MEDIA_ROOT, path));
-      processUnlinkDir(path);
-    })
-    .on("error", (error) => log("ERROR", "Watcher error", { error }));
-}
+// ---------------------------------------------------------------------------
+// Startup & main loop
+// ---------------------------------------------------------------------------
 
 async function mainLoop() {
-  log("INFO", "Loom Event-Driven Scanner started");
+  log("INFO", "Loom Scanner started (DB-backed job queue — no filesystem watcher)");
   await ensureDir(THUMB_DIR);
   await ensureDir(PREVIEW_DIR);
   await ensureDir(TEMP_DIR);
 
-  try {
-    log("INFO", "Running startup reconciliation scan...");
-    // Create a DB-tracked startup scan job so progress is visible in the UI
-    const startupJob = await prisma.scanJob.create({
-      data: { type: "FULL", status: "PENDING" }
-    });
-    await runFullScan(startupJob.id);
-    await setupWatcher();
-  } catch (err) {
-    log("WARN", "Watcher failed to start (drive may be unmounted)");
-  }
+  // On startup, do NOT scan automatically. The SSD must be left completely
+  // idle so the OS USB runtime PM can suspend it.
+  // The Owner triggers scans explicitly via Settings → Scanner → Rescan Library.
 
   while (true) {
     try {
@@ -481,8 +504,8 @@ async function mainLoop() {
     } catch (err) {
       log("ERROR", "Job loop error", { error: String(err) });
     }
-    // Check for manual scan jobs every 10 seconds
-    await new Promise((r) => setTimeout(r, 10000));
+    // Poll DB for new jobs every 10 seconds — zero SSD activity between jobs
+    await new Promise((r) => setTimeout(r, 10_000));
   }
 }
 

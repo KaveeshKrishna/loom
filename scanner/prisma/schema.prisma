@@ -143,29 +143,33 @@ model Favorite {
 }
 
 // ─────────────────────────────────────────────
-// SCAN JOBS (queue for manual full scans)
+// SCAN JOBS (DB-backed job queue — no filesystem watcher)
 // ─────────────────────────────────────────────
 
 model ScanJob {
-  id          String      @id @default(cuid())
-  type        ScanType    @default(INCREMENTAL)
-  status      ScanStatus  @default(PENDING)
-  requestedBy String?
-  requestedAt DateTime    @default(now())
-  startedAt   DateTime?
-  completedAt DateTime?
-  error       String?
-  processedFiles Int @default(0)
-  totalFiles     Int @default(0)
+  id             String      @id @default(cuid())
+  // FULL_RESCAN — walk all of /media (Owner-only Rescan Library action)
+  // INDEX_FILE  — index a single file after an internal upload
+  type           ScanType    @default(FULL_RESCAN)
+  status         ScanStatus  @default(PENDING)
+  requestedBy    String?
+  requestedAt    DateTime    @default(now())
+  startedAt      DateTime?
+  completedAt    DateTime?
+  error          String?
+  processedFiles Int         @default(0)
+  totalFiles     Int         @default(0)
+  // Only set for INDEX_FILE jobs: relative path inside /media
+  targetPath     String?
 
-  user        User?       @relation(fields: [requestedBy], references: [id])
+  user           User?       @relation(fields: [requestedBy], references: [id])
 
   @@map("scan_jobs")
 }
 
 enum ScanType {
-  INCREMENTAL
-  FULL
+  FULL_RESCAN
+  INDEX_FILE
 }
 
 enum ScanStatus {
@@ -173,6 +177,7 @@ enum ScanStatus {
   RUNNING
   COMPLETED
   FAILED
+  CANCELLED
 }
 
 // ─────────────────────────────────────────────

@@ -11,7 +11,7 @@ export async function getArchiveStatus(): Promise<ArchiveStatus> {
 export async function requestFullScan(): Promise<{ success: boolean; jobId?: string; error?: string }> {
   try {
     const job = await prisma.scanJob.create({
-      data: { type: "FULL", status: "PENDING" }
+      data: { type: "FULL_RESCAN", status: "PENDING" }
     });
     return { success: true, jobId: job.id };
   } catch (err) {

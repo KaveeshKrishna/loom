@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { headers } from "next/headers";
 
-export async function POST(req: NextRequest) {
+export async function POST() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -14,11 +14,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { type } = await req.json().catch(() => ({ type: "FULL" }));
-
+  // Only FULL_RESCAN is Owner-triggerable. INDEX_FILE is created by the
+  // upload pipeline after a successful atomic file move to /media.
   const job = await prisma.scanJob.create({
     data: {
-      type: type === "INCREMENTAL" ? "INCREMENTAL" : "FULL",
+      type: "FULL_RESCAN",
       status: "PENDING",
       requestedBy: user.id,
     },

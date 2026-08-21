@@ -38,9 +38,9 @@ export function ScanPanel() {
   const isRunning = jobs.some(j => j.status === "RUNNING");
   useEffect(() => { load(); const i = setInterval(load, isRunning ? 3000 : 10000); return () => clearInterval(i); }, [isRunning]);
 
-  const trigger = async (type: "FULL" | "INCREMENTAL") => {
+  const trigger = async () => {
     setTriggering(true);
-    await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type }) });
+    await fetch("/api/scan", { method: "POST" });
     setTimeout(() => { load(); setTriggering(false); }, 500);
   };
 
@@ -58,7 +58,7 @@ export function ScanPanel() {
         </div>
         <div className="flex gap-2">
           
-          <button id="scan-full" onClick={() => trigger("FULL")} disabled={triggering} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-[hsl(var(--primary))] text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-60">
+          <button id="scan-full" onClick={() => trigger()} disabled={triggering} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-[hsl(var(--primary))] text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-60">
             {triggering ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Scan Now
           </button>
         </div>
@@ -77,7 +77,9 @@ export function ScanPanel() {
                 <StatusIcon status={job.status} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-0.5">
-                    <p className="text-sm font-medium">{job.type === "FULL" ? "Rescan Library" : "Incremental scan"}</p>
+                    <p className="text-sm font-medium">
+                      {job.type === "FULL_RESCAN" ? "Rescan Library" : job.type === "INDEX_FILE" ? "Index file" : job.type}
+                    </p>
                     {job.status === "RUNNING" && typeof job.processedFiles === 'number' && typeof job.totalFiles === 'number' && job.totalFiles > 0 && (
                       <span className="text-xs font-medium text-[hsl(var(--primary))]">
                         {Math.round((job.processedFiles / job.totalFiles) * 100)}%
@@ -110,6 +112,7 @@ export function ScanPanel() {
                     ${job.status === "COMPLETED" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" :
                       job.status === "FAILED" ? "bg-rose-500/10 text-rose-600 dark:text-rose-400" :
                       job.status === "RUNNING" ? "bg-[hsl(var(--primary)/0.1)] text-[hsl(var(--primary))]" :
+                      job.status === "CANCELLED" ? "bg-orange-500/10 text-orange-600 dark:text-orange-400" :
                       "bg-[hsl(var(--accent))] text-[hsl(var(--muted-foreground))]"}`}>
                     {job.status.toLowerCase()}
                   </span>
