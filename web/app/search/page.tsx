@@ -1,6 +1,6 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useEffect, useState, Suspense } from "react";
 import { FileList } from "@/components/files/FileList";
 import { MediaViewer } from "@/components/viewer/MediaViewer";
@@ -11,6 +11,7 @@ type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: 
 
 function SearchResults() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const q = searchParams.get("q") ?? "";
   const [results, setResults] = useState<FileNodeWithThumbnail[]>([]);
   const [loading, setLoading] = useState(false);
@@ -58,7 +59,10 @@ function SearchResults() {
       ) : (
         <FileList
           nodes={results}
-          onNavigate={(n) => { if (n.type === "FILE") setViewer(n); }}
+          onNavigate={(n) => { 
+            if (n.type === "FILE") setViewer(n); 
+            else if (n.type === "DIRECTORY") router.push(`/files/${n.relativePath}`);
+          }}
         />
       )}
 

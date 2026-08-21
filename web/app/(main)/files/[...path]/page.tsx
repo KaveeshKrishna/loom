@@ -7,6 +7,7 @@ import { FileList } from "@/components/files/FileList";
 import { MediaViewer } from "@/components/viewer/MediaViewer";
 import { Loader2 } from "lucide-react";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
+import { useTopBar } from "@/components/layout/TopBarContext";
 
 type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
 
@@ -22,7 +23,20 @@ export default function FilesPage() {
 
   const [nodes, setNodes] = useState<FileNodeWithThumbnail[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewMode] = useState<"grid" | "list">("grid");
+  const { viewMode, setBreadcrumbs } = useTopBar();
+  
+  useEffect(() => {
+    const crumbs = [{ label: "Home", href: "/files" }];
+    let current = "/files";
+    for (const segment of pathSegments) {
+      if (!segment) continue;
+      current += `/${segment}`;
+      crumbs.push({ label: segment, href: current });
+    }
+    setBreadcrumbs(crumbs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPath, setBreadcrumbs]);
+
   const [viewer, setViewer] = useState<{
     node: FileNodeWithThumbnail;
     siblings: FileNodeWithThumbnail[];

@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { FileGrid } from "@/components/files/FileGrid";
+import { FileList } from "@/components/files/FileList";
 import { MediaViewer } from "@/components/viewer/MediaViewer";
 import { Loader2, Star } from "lucide-react";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
+import { useTopBar } from "@/components/layout/TopBarContext";
 
 type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
 
@@ -13,6 +15,7 @@ export default function FavoritesPage() {
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [viewer, setViewer] = useState<{ node: FileNodeWithThumbnail } | null>(null);
+  const { viewMode, setBreadcrumbs } = useTopBar();
 
   const load = () => {
     fetch("/api/favorites")
@@ -26,7 +29,10 @@ export default function FavoritesPage() {
       .catch(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { 
+    setBreadcrumbs([{ label: "Favorites", href: "/favorites" }]);
+    load(); 
+  }, [setBreadcrumbs]);
 
   const toggleFavorite = async (nodeId: string) => {
     await fetch("/api/favorites", {
@@ -50,8 +56,10 @@ export default function FavoritesPage() {
         <div className="flex items-center justify-center py-24">
           <Loader2 size={24} className="animate-spin text-[hsl(var(--muted-foreground))]" />
         </div>
-      ) : (
+      ) : viewMode === "grid" ? (
         <FileGrid nodes={nodes} onNavigate={(n) => n.type === "FILE" && setViewer({ node: n })} onFavorite={toggleFavorite} favoriteIds={favoriteIds} />
+      ) : (
+        <FileList nodes={nodes} onNavigate={(n) => n.type === "FILE" && setViewer({ node: n })} onFavorite={toggleFavorite} favoriteIds={favoriteIds} />
       )}
       {viewer && (
         <MediaViewer

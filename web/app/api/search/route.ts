@@ -20,11 +20,7 @@ export async function GET(req: NextRequest) {
   const results = await prisma.fileNode.findMany({
     where: {
       isVisible: true,
-      OR: [
-        { name: { contains: q, mode: "insensitive" } },
-        { relativePath: { contains: q, mode: "insensitive" } },
-        { mimeType: { contains: q, mode: "insensitive" } },
-      ],
+      name: { contains: q, mode: "insensitive" },
     },
     include: { thumbnail: true, preview: true },
     take: 50,
