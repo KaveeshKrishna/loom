@@ -1,0 +1,24 @@
+{
+  "name": "loom-scanner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --experimental-vm-modules dist/index.js",
+    "build": "tsc",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.11.1",
+    "chokidar": "^3.6.0",
+    "mime-types": "2.1.35",
+    "sharp": "0.34.3"
+  },
+  "devDependencies": {
+    "@types/mime-types": "2.1.4",
+    "@types/node": "22.15.30",
+    "prisma": "^6.11.1",
+    "tsx": "4.20.3",
+    "typescript": "5.8.3"
+  }
+}

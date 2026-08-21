@@ -1,0 +1,22 @@
+[Unit]
+Description=Loom Mount Service
+Documentation=https://github.com/kaveeshkrishna/loom
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/srv/apps/loom/host-services
+ExecStart=/usr/bin/python3 /srv/apps/loom/host-services/mount-api.py
+Restart=on-failure
+RestartSec=5
+
+# Load secrets from a protected env file
+EnvironmentFile=/etc/loom/mount-service.env
+
+# Security hardening
+NoNewPrivileges=false
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
