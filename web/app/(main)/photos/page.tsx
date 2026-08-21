@@ -2,15 +2,23 @@
 
 import { useEffect, useState } from "react";
 import { FileGrid } from "@/components/files/FileGrid";
+import { FileList } from "@/components/files/FileList";
 import { MediaViewer } from "@/components/viewer/MediaViewer";
 import { Loader2, Image as ImageIcon } from "lucide-react";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
+import { useTopBar } from "@/components/layout/TopBarContext";
 
 type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
 
 export default function PhotosPage() {
   const [nodes, setNodes] = useState<FileNodeWithThumbnail[]>([]);
   const [loading, setLoading] = useState(true);
+  const { viewMode, setBreadcrumbs } = useTopBar();
+  
+  useEffect(() => {
+    setBreadcrumbs([{ label: "Photos", href: "/photos" }]);
+  }, [setBreadcrumbs]);
+
   const [viewer, setViewer] = useState<{
     node: FileNodeWithThumbnail;
     siblings: FileNodeWithThumbnail[];
@@ -46,8 +54,13 @@ export default function PhotosPage() {
         <div className="flex items-center justify-center py-24">
           <Loader2 size={24} className="animate-spin text-[hsl(var(--muted-foreground))]" />
         </div>
-      ) : (
+      ) : viewMode === "grid" ? (
         <FileGrid
+          nodes={nodes}
+          onNavigate={(n) => setViewer({ node: n, siblings: nodes })}
+        />
+      ) : (
+        <FileList
           nodes={nodes}
           onNavigate={(n) => setViewer({ node: n, siblings: nodes })}
         />

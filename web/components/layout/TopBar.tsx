@@ -7,9 +7,6 @@ import { cn } from "@/lib/utils";
 import { signOut } from "@/lib/auth-client";
 
 interface TopBarProps {
-  breadcrumbs?: { label: string; href: string }[];
-  viewMode?: "grid" | "list";
-  onViewModeChange?: (mode: "grid" | "list") => void;
   onMenuToggle?: () => void;
   userName: string;
 }
@@ -35,12 +32,15 @@ function useTheme() {
   return { theme, applyTheme };
 }
 
-export function TopBar({ breadcrumbs, viewMode, onViewModeChange, onMenuToggle, userName }: TopBarProps) {
+import { useTopBar } from "./TopBarContext";
+
+export function TopBar({ onMenuToggle, userName }: TopBarProps) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const { theme, applyTheme } = useTheme();
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const { viewMode, setViewMode, breadcrumbs } = useTopBar();
 
   useEffect(() => {
     function handle(e: MouseEvent) {
@@ -120,34 +120,32 @@ export function TopBar({ breadcrumbs, viewMode, onViewModeChange, onMenuToggle, 
 
       <div className="flex items-center gap-1">
         {/* View toggle */}
-        {onViewModeChange && (
-          <div className="hidden sm:flex border rounded-lg overflow-hidden">
-            <button
-              id="topbar-grid-view"
-              onClick={() => onViewModeChange("grid")}
-              className={cn(
-                "p-1.5 transition-colors",
-                viewMode === "grid"
-                  ? "bg-[hsl(var(--primary))] text-white"
-                  : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]"
-              )}
-            >
-              <Grid3X3 size={15} />
-            </button>
-            <button
-              id="topbar-list-view"
-              onClick={() => onViewModeChange("list")}
-              className={cn(
-                "p-1.5 transition-colors",
-                viewMode === "list"
-                  ? "bg-[hsl(var(--primary))] text-white"
-                  : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]"
-              )}
-            >
-              <List size={15} />
-            </button>
-          </div>
-        )}
+        <div className="hidden sm:flex border rounded-lg overflow-hidden">
+          <button
+            id="topbar-grid-view"
+            onClick={() => setViewMode("grid")}
+            className={cn(
+              "p-1.5 transition-colors",
+              viewMode === "grid"
+                ? "bg-[hsl(var(--primary))] text-white"
+                : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]"
+            )}
+          >
+            <Grid3X3 size={15} />
+          </button>
+          <button
+            id="topbar-list-view"
+            onClick={() => setViewMode("list")}
+            className={cn(
+              "p-1.5 transition-colors",
+              viewMode === "list"
+                ? "bg-[hsl(var(--primary))] text-white"
+                : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]"
+            )}
+          >
+            <List size={15} />
+          </button>
+        </div>
 
         {/* User menu */}
         <div className="relative" ref={userMenuRef}>
