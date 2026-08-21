@@ -63,11 +63,13 @@ export function ArchivePanel() {
       </div>
 
       <div className="bg-blue-500/8 border border-blue-500/20 rounded-xl p-4">
-        <p className="text-sm font-medium text-blue-700 dark:text-blue-400">Filesystem Events</p>
+        <p className="text-sm font-medium text-blue-700 dark:text-blue-400">How indexing works</p>
         <p className="text-xs text-blue-600 dark:text-blue-500 mt-1.5 leading-relaxed">
-          The scanner automatically listens for changes on the connected SSD using inotify. 
-          If you have disconnected the drive to modify files externally (e.g. on Windows), 
-          click <strong>Rescan Library</strong> after reconnecting to reconcile any changes made while offline.
+          The scanner runs as a passive job worker — it does not watch the filesystem.
+          Files added through Loom&apos;s upload feature are indexed automatically after the upload completes.
+          Files added externally (e.g. by connecting the T7 to another computer) will appear
+          after you click <strong>Rescan Library</strong>.
+          When no scan is running, the T7 is completely idle and the OS can suspend the USB device.
         </p>
       </div>
     </div>
