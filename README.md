@@ -23,8 +23,8 @@ Loom is a production-quality, self-hosted personal storage application for the `
 | PostgreSQL | Metadata only (never original files) |
 
 **Scanner & Cache Architecture:**
-- **Real-time Watcher:** The scanner uses `chokidar` to detect real-time filesystem events when the drive is active.
-- **Reconciliation Scans:** A fast startup scan and manual "Rescan Library" button skips unchanged files (by size and mtime) and generates missing thumbnails/previews.
+- **Idle by Default:** The scanner intentionally does NOT use a real-time filesystem watcher (like `chokidar`) and does NOT scan automatically on startup. This guarantees the Samsung T7 SSD remains completely idle and is allowed to sleep (via USB runtime power management) when not in use.
+- **Manual Reconciliation Scans:** Scans are triggered explicitly by the Owner (via Settings → Scanner → Rescan Library) or via atomic upload jobs. Scans skip unchanged files (by size and mtime) and generate missing thumbnails/previews.
 - **Dual Cache Layer:** 
   - `thumbnails/` (320px) for ultra-fast FileGrid loading.
   - `previews/` (1920px) for high-resolution full-screen MediaViewer.
