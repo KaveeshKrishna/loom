@@ -1,0 +1,44 @@
+{
+  "name": "loom-web",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.11.1",
+    "bcryptjs": "3.0.2",
+    "better-auth": "1.2.9",
+    "clsx": "2.1.1",
+    "lucide-react": "0.474.0",
+    "mime-types": "2.1.35",
+    "next": "15.3.4",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "sharp": "0.34.3",
+    "tailwind-merge": "3.3.1",
+    "tsx": "4.20.3",
+    "typescript": "5.8.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.1.11",
+    "@types/bcryptjs": "2.4.6",
+    "@types/mime-types": "2.1.4",
+    "@types/node": "22.15.30",
+    "@types/react": "19.1.8",
+    "@types/react-dom": "19.1.6",
+    "eslint": "9.29.0",
+    "eslint-config-next": "15.3.4",
+    "postcss": "8.5.6",
+    "prisma": "^6.11.1",
+    "tailwindcss": "4.1.11"
+  }
+}

@@ -1,0 +1,63 @@
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    container_name: loom-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: loom
+      POSTGRES_USER: loom
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loom -d loom"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Web App ─────────────────────────────────────────────────────────────────
+  loom-web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: loom-web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8085:3000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://loom:${POSTGRES_PASSWORD}@postgres:5432/loom
+    volumes:
+      - /srv/storage/personal/media:/media
+      - /srv/data/gallery-cache:/cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ── Scanner ─────────────────────────────────────────────────────────────────
+  loom-scanner:
+    build:
+      context: ./scanner
+      dockerfile: Dockerfile
+    container_name: loom-scanner
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://loom:${POSTGRES_PASSWORD}@postgres:5432/loom
+    volumes:
+      - /srv/storage/personal/media:/media
+      - /srv/data/gallery-cache:/cache
+      # Share web's prisma schema for client generation
+      - ./web/prisma:/app/prisma:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+    driver: local
