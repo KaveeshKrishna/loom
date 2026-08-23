@@ -24,25 +24,39 @@ export function formatDate(date: Date | string | null): string {
 }
 
 export function getFileCategory(
-  mimeType: string | null
+  mimeType: string | null,
+  filename?: string
 ): "image" | "video" | "document" | "audio" | "other" {
-  if (!mimeType) return "other";
-  if (mimeType.startsWith("image/")) return "image";
-  if (mimeType.startsWith("video/")) return "video";
-  if (mimeType.startsWith("audio/")) return "audio";
-  if (
-    mimeType.includes("pdf") ||
-    mimeType.includes("document") ||
-    mimeType.includes("text") ||
-    mimeType.includes("presentation") ||
-    mimeType.includes("spreadsheet")
-  )
-    return "document";
+  if (mimeType) {
+    if (mimeType.startsWith("image/")) return "image";
+    if (mimeType.startsWith("video/")) return "video";
+    if (mimeType.startsWith("audio/")) return "audio";
+    if (
+      mimeType.includes("pdf") ||
+      mimeType.includes("document") ||
+      mimeType.includes("text") ||
+      mimeType.includes("presentation") ||
+      mimeType.includes("spreadsheet")
+    )
+      return "document";
+  }
+
+  if (filename) {
+    const ext = getExtension(filename);
+    if (["thm", "thim", "heic", "avif", "jpg", "jpeg", "png", "gif", "webp"].includes(ext)) return "image";
+    if (["mpg", "mpeg", "mkv", "avi", "wmv", "flv", "mp4", "webm", "mov"].includes(ext)) return "video";
+  }
+
   return "other";
 }
 
 export function getExtension(filename: string): string {
   return filename.split(".").pop()?.toLowerCase() ?? "";
+}
+
+export function truncateName(name: string, maxLen: number = 15): string {
+  if (name.length <= maxLen) return name;
+  return name.slice(0, maxLen - 3) + "...";
 }
 
 /**

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { FileGrid } from "@/components/files/FileGrid";
 import { FileList } from "@/components/files/FileList";
-import { MediaViewer } from "@/components/viewer/MediaViewer";
+import { MediaViewer, type MediaSibling } from "@/components/viewer/MediaViewer";
 import { Loader2, Image as ImageIcon } from "lucide-react";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
 import { useTopBar } from "@/components/layout/TopBarContext";
@@ -13,7 +13,7 @@ type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: 
 export default function PhotosPage() {
   const [nodes, setNodes] = useState<FileNodeWithThumbnail[]>([]);
   const [loading, setLoading] = useState(true);
-  const { viewMode, setBreadcrumbs } = useTopBar();
+  const { viewMode, setBreadcrumbs, searchQuery, searchGlobal } = useTopBar();
   
   useEffect(() => {
     setBreadcrumbs([{ label: "Photos", href: "/photos" }]);
@@ -21,25 +21,22 @@ export default function PhotosPage() {
 
   const [viewer, setViewer] = useState<{
     node: FileNodeWithThumbnail;
-    siblings: FileNodeWithThumbnail[];
+    siblings: MediaSibling[];
   } | null>(null);
 
   useEffect(() => {
-    fetch("/api/files/recent")
+    fetch("/api/files/type?type=image")
       .then((r) => r.json())
       .then((data) => {
-        const photos = (data.nodes ?? []).filter(
-          (n: FileNodeWithThumbnail) => n.mimeType?.startsWith("image/")
-        );
-        setNodes(photos);
+        setNodes(data.nodes ?? []);
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, []);
 
-  const viewerIndex = viewer
-    ? viewer.siblings.findIndex((n) => n.id === viewer.node.id)
-    : -1;
+  const filteredNodes = nodes.filter(
+    (n) => searchGlobal || !searchQuery || n.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <div>
@@ -48,7 +45,7 @@ export default function PhotosPage() {
           <ImageIcon size={20} className="text-violet-500" />
           <h1 className="text-lg font-semibold">Photos</h1>
         </div>
-        <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">{nodes.length} photos</p>
+        <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">{filteredNodes.length} photos</p>
       </div>
       {loading ? (
         <div className="flex items-center justify-center py-24">
@@ -56,13 +53,25 @@ export default function PhotosPage() {
         </div>
       ) : viewMode === "grid" ? (
         <FileGrid
-          nodes={nodes}
-          onNavigate={(n) => setViewer({ node: n, siblings: nodes })}
+          nodes={filteredNodes}
+          onNavigate={(n) => {
+            const siblings: MediaSibling[] = filteredNodes.map((fn) => ({
+              id: fn.id, name: fn.name, relativePath: fn.relativePath,
+              mimeType: fn.mimeType, cachePath: fn.preview?.cachePath || fn.thumbnail?.cachePath,
+            }));
+            setViewer({ node: n, siblings });
+          }}
         />
       ) : (
         <FileList
-          nodes={nodes}
-          onNavigate={(n) => setViewer({ node: n, siblings: nodes })}
+          nodes={filteredNodes}
+          onNavigate={(n) => {
+            const siblings: MediaSibling[] = filteredNodes.map((fn) => ({
+              id: fn.id, name: fn.name, relativePath: fn.relativePath,
+              mimeType: fn.mimeType, cachePath: fn.preview?.cachePath || fn.thumbnail?.cachePath,
+            }));
+            setViewer({ node: n, siblings });
+          }}
         />
       )}
       {viewer && (
@@ -72,10 +81,12 @@ export default function PhotosPage() {
           name={viewer.node.name}
           mimeType={viewer.node.mimeType}
           onClose={() => setViewer(null)}
-          hasPrev={viewerIndex > 0}
-          hasNext={viewerIndex < viewer.siblings.length - 1}
-          onPrev={() => setViewer((v) => v ? { ...v, node: v.siblings[viewerIndex - 1] } : null)}
-          onNext={() => setViewer((v) => v ? { ...v, node: v.siblings[viewerIndex + 1] } : null)}
+          siblings={viewer.siblings}
+          currentId={viewer.node.id}
+          onNavigateTo={(s) => {
+            const fullNode = nodes.find((n) => n.id === s.id);
+            if (fullNode) setViewer((v) => v ? { ...v, node: fullNode } : null);
+          }}
         />
       )}
     </div>

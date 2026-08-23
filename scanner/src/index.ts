@@ -33,8 +33,8 @@ const IGNORED_DIRS = new Set([
 ]);
 
 // File extensions for which we generate thumbnails/previews
-const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".heic", ".gif", ".avif"]);
-const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm"]);
+const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".heic", ".gif", ".avif", ".thm", ".thim"]);
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm", ".mpg", ".mpeg"]);
 
 // ---------------------------------------------------------------------------
 // Logging
@@ -233,10 +233,11 @@ async function processDirectory(absolutePath: string) {
   if (!relativePath) return; // root
 
   try {
+    const dirStat = await stat(absolutePath);
     await prisma.fileNode.upsert({
       where: { relativePath },
-      update: { name, isVisible: true },
-      create: { relativePath, name, type: "DIRECTORY", isVisible: true },
+      update: { name, isVisible: true, modifiedAt: dirStat.mtime },
+      create: { relativePath, name, type: "DIRECTORY", isVisible: true, modifiedAt: dirStat.mtime },
     });
   } catch (err) {
     log("WARN", `Failed to process dir: ${relativePath}`, { error: String(err) });

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import bcrypt from "bcryptjs";
+import { hashPassword } from "better-auth/crypto";
 import { headers } from "next/headers";
 
 async function requireOwner() {
@@ -38,10 +38,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Email already in use" }, { status: 409 });
   }
 
-  const hash = await bcrypt.hash(password, 12);
+  // Use Better Auth's own hashPassword so the hash format matches what
+  // Better Auth's verifyPassword expects during sign-in.
+  const hash = await hashPassword(password);
+
   const user = await prisma.user.create({
     data: { name, email, password: hash, role: role === "OWNER" ? "OWNER" : "FAMILY" },
     select: { id: true, name: true, email: true, role: true, createdAt: true },
+  });
+
+  // Create the credential account row that Better Auth looks up on sign-in.
+  await prisma.account.create({
+    data: {
+      accountId: user.id,
+      providerId: "credential",
+      userId: user.id,
+      password: hash,
+    },
   });
 
   await prisma.auditLog.create({

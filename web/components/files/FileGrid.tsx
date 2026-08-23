@@ -1,8 +1,11 @@
 "use client";
+import React, { useRef } from "react";
 
 import { Folder, FileText, Image as ImageIcon, Video, Music, File, Star } from "lucide-react";
 import { cn, formatBytes, getFileCategory } from "@/lib/utils";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
+import { FolderMenu } from "./FolderMenu";
+import { useTopBar } from "../layout/TopBarContext";
 
 type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
 
@@ -11,6 +14,7 @@ interface FileGridProps {
   onNavigate: (node: FileNodeWithThumbnail) => void;
   onFavorite?: (nodeId: string) => void;
   favoriteIds?: Set<string>;
+  showPath?: boolean;
 }
 
 function FileIcon({ mimeType, type }: { mimeType: string | null; type: string }) {
@@ -23,7 +27,20 @@ function FileIcon({ mimeType, type }: { mimeType: string | null; type: string })
   return <File size={24} className="text-[hsl(var(--muted-foreground))]" />;
 }
 
-export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds }: FileGridProps) {
+export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds, showPath }: FileGridProps) {
+  const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
+
+  // Hooks must be called before any early returns
+  const { gridSize } = useTopBar();
+
+  const gridClasses: Record<string, string> = {
+    sm: "grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-9 2xl:grid-cols-11",
+    md: "grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8",
+    lg: "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6",
+    xl: "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+  };
+
   if (nodes.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-[hsl(var(--muted-foreground))]">
@@ -40,12 +57,44 @@ export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds }: FileGri
   });
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 p-4">
+    <div className={cn("grid gap-3 p-4", gridClasses[gridSize])}>
       {sorted.map((node) => (
         <button
           key={node.id}
           id={`file-${node.id}`}
-          onClick={() => onNavigate(node)}
+          onClick={(e) => {
+            if (longPressFiredRef.current) {
+              e.preventDefault();
+              e.stopPropagation();
+              return;
+            }
+            onNavigate(node);
+          }}
+          onContextMenu={(e: React.MouseEvent) => {
+            if (node.type === "DIRECTORY") {
+              e.preventDefault();
+              document.getElementById(`folder-menu-btn-${node.id}`)?.click();
+            }
+          }}
+          onTouchStart={() => {
+            if (node.type === "DIRECTORY") {
+              longPressFiredRef.current = false;
+              touchTimerRef.current = setTimeout(() => {
+                longPressFiredRef.current = true;
+                document.getElementById(`folder-menu-btn-${node.id}`)?.click();
+              }, 500);
+            }
+          }}
+          onTouchMove={() => { 
+            if (touchTimerRef.current) clearTimeout(touchTimerRef.current); 
+            longPressFiredRef.current = false;
+          }}
+          onTouchEnd={(e) => { 
+            if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
+            if (longPressFiredRef.current) {
+              if (e.cancelable) e.preventDefault();
+            }
+          }}
           className="group relative flex flex-col gap-2 p-3 rounded-xl border bg-[hsl(var(--card))] hover:border-[hsl(var(--primary)/0.3)] hover:shadow-md transition-all duration-150 text-left animate-in-fade"
         >
           {/* Thumbnail or icon */}
@@ -63,8 +112,15 @@ export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds }: FileGri
             )}
           </div>
 
-          {/* Name */}
-          <p className="text-xs font-medium truncate leading-snug">{node.name}</p>
+          {/* Name and Path */}
+          <div className="flex flex-col min-w-0">
+            <p className="text-xs font-medium truncate leading-snug">{node.name}</p>
+            {showPath && (
+              <p className="text-[10px] text-[hsl(var(--muted-foreground))] truncate mt-0.5">
+                {node.relativePath.split("/").slice(0, -1).join("/") || "/"}
+              </p>
+            )}
+          </div>
 
           {/* Size */}
           {node.size != null && node.type === "FILE" && (
@@ -85,6 +141,13 @@ export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds }: FileGri
             >
               <Star size={13} fill={favoriteIds?.has(node.id) ? "currentColor" : "none"} />
             </button>
+          )}
+
+          {/* Folder Menu */}
+          {node.type === "DIRECTORY" && (
+            <div className="absolute top-2 right-2 transition-all">
+              <FolderMenu node={node} />
+            </div>
           )}
         </button>
       ))}

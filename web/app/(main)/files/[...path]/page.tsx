@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { FileGrid } from "@/components/files/FileGrid";
 import { FileList } from "@/components/files/FileList";
-import { MediaViewer } from "@/components/viewer/MediaViewer";
+import { MediaViewer, type MediaSibling } from "@/components/viewer/MediaViewer";
 import { Loader2 } from "lucide-react";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
 import { useTopBar } from "@/components/layout/TopBarContext";
@@ -22,8 +22,10 @@ export default function FilesPage() {
   const currentPath = pathSegments.join("/");
 
   const [nodes, setNodes] = useState<FileNodeWithThumbnail[]>([]);
+  const [searchNodes, setSearchNodes] = useState<FileNodeWithThumbnail[] | null>(null);
   const [loading, setLoading] = useState(true);
-  const { viewMode, setBreadcrumbs } = useTopBar();
+  const [searching, setSearching] = useState(false);
+  const { viewMode, setBreadcrumbs, searchQuery, searchGlobal } = useTopBar();
   
   useEffect(() => {
     const crumbs = [{ label: "Home", href: "/files" }];
@@ -39,7 +41,7 @@ export default function FilesPage() {
 
   const [viewer, setViewer] = useState<{
     node: FileNodeWithThumbnail;
-    siblings: FileNodeWithThumbnail[];
+    siblings: MediaSibling[];
   } | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
 
@@ -64,13 +66,36 @@ export default function FilesPage() {
       .catch(() => {});
   }, [currentPath]);
 
+  useEffect(() => {
+    if (searchQuery && !searchGlobal) {
+      setSearching(true);
+      fetch(`/api/search?q=${encodeURIComponent(searchQuery)}&folder=${encodeURIComponent(currentPath)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          setSearchNodes(data.results ?? []);
+          setSearching(false);
+        })
+        .catch(() => setSearching(false));
+    } else {
+      setSearchNodes(null);
+    }
+  }, [searchQuery, searchGlobal, currentPath]);
+
   const navigate = useCallback(
     (node: FileNodeWithThumbnail) => {
       if (node.type === "DIRECTORY") {
         router.push(`/files/${node.relativePath}`);
       } else {
-        const siblings = nodes.filter((n) => n.type === "FILE");
-        setViewer({ node, siblings });
+      const siblings: MediaSibling[] = nodes
+        .filter((n) => n.type === "FILE")
+        .map((n) => ({
+          id: n.id,
+          name: n.name,
+          relativePath: n.relativePath,
+          mimeType: n.mimeType,
+          cachePath: n.preview?.cachePath || n.thumbnail?.cachePath,
+        }));
+      setViewer({ node, siblings });
       }
     },
     [nodes, router]
@@ -91,11 +116,9 @@ export default function FilesPage() {
     });
   };
 
-  const viewerIndex = viewer
-    ? viewer.siblings.findIndex((n) => n.id === viewer.node.id)
-    : -1;
 
-  if (loading) {
+
+  if (loading || (searching && !searchNodes)) {
     return (
       <div className="flex items-center justify-center py-24">
         <Loader2 size={24} className="animate-spin text-[hsl(var(--muted-foreground))]" />
@@ -103,21 +126,27 @@ export default function FilesPage() {
     );
   }
 
+  const displayNodes = searchNodes ?? nodes;
+  const filteredNodes = searchGlobal ? nodes : displayNodes;
+  const isSearchActive = !searchGlobal && !!searchQuery;
+
   return (
     <>
       {viewMode === "grid" ? (
         <FileGrid
-          nodes={nodes}
+          nodes={filteredNodes}
           onNavigate={navigate}
           onFavorite={toggleFavorite}
           favoriteIds={favoriteIds}
+          showPath={isSearchActive}
         />
       ) : (
         <FileList
-          nodes={nodes}
+          nodes={filteredNodes}
           onNavigate={navigate}
           onFavorite={toggleFavorite}
           favoriteIds={favoriteIds}
+          showPath={isSearchActive}
         />
       )}
 
@@ -128,18 +157,12 @@ export default function FilesPage() {
           name={viewer.node.name}
           mimeType={viewer.node.mimeType}
           onClose={() => setViewer(null)}
-          hasPrev={viewerIndex > 0}
-          hasNext={viewerIndex < viewer.siblings.length - 1}
-          onPrev={() =>
-            setViewer((v) =>
-              v ? { ...v, node: v.siblings[viewerIndex - 1] } : null
-            )
-          }
-          onNext={() =>
-            setViewer((v) =>
-              v ? { ...v, node: v.siblings[viewerIndex + 1] } : null
-            )
-          }
+          siblings={viewer.siblings}
+          currentId={viewer.node.id}
+          onNavigateTo={(s) => {
+            const fullNode = nodes.find((n) => n.id === s.id);
+            if (fullNode) setViewer((v) => v ? { ...v, node: fullNode } : null);
+          }}
         />
       )}
     </>

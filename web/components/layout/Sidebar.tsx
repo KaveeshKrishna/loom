@@ -1,17 +1,19 @@
 "use client";
+import React from "react";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState, useRef, useCallback } from "react";
 import {
-  Clock, Star, FolderOpen, Image, Video, FileText,
-  Settings, ChevronRight, X
+  Star, FolderOpen, Image, Video, FileText,
+  Settings, ChevronRight, X, MoreVertical, PinOff
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ArchiveStatusBadge } from "@/components/ui/ArchiveStatusBadge";
+import { useTopBar } from "./TopBarContext";
 
 const navItems = [
   { href: "/files", label: "All Files", icon: FolderOpen },
-  { href: "/recent", label: "Recent", icon: Clock },
   { href: "/favorites", label: "Favorites", icon: Star },
   { href: "/photos", label: "Photos", icon: Image },
   { href: "/videos", label: "Videos", icon: Video },
@@ -24,27 +26,52 @@ interface SidebarProps {
   userEmail: string;
   onClose?: () => void;
   isMobile?: boolean;
+  collapsed?: boolean;
 }
 
-export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile }: SidebarProps) {
+export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, collapsed }: SidebarProps) {
   const pathname = usePathname();
+  const { pins, togglePin } = useTopBar();
+  const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
+
+  const handleLongPressStart = useCallback((id: string) => {
+    longPressFiredRef.current = false;
+    touchTimerRef.current = setTimeout(() => {
+      longPressFiredRef.current = true;
+      document.getElementById(id)?.click();
+    }, 500);
+  }, []);
+
+  const handleLongPressClear = useCallback(() => {
+    if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
+    longPressFiredRef.current = false;
+  }, []);
+
+  const handleLongPressEnd = useCallback((e: React.TouchEvent) => {
+    if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
+    if (longPressFiredRef.current && e.cancelable) e.preventDefault();
+  }, []);
 
   return (
     <aside
       className={cn(
-        "flex flex-col h-full w-64 border-r bg-[hsl(var(--sidebar))]",
-        isMobile && "fixed inset-y-0 left-0 z-50 shadow-2xl"
+        "flex flex-col h-full border-r bg-[hsl(var(--sidebar))]",
+        collapsed ? "w-16" : "w-56",
+        isMobile && "fixed inset-y-0 left-0 z-[60] shadow-2xl w-56"
       )}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-5 h-16 border-b border-[hsl(var(--sidebar-border))]">
+      <div className={cn("flex items-center h-14 border-b border-[hsl(var(--sidebar-border))]", collapsed ? "justify-center px-0" : "justify-between px-5")}>
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-[hsl(var(--primary))] flex items-center justify-center">
+          <div className="w-7 h-7 rounded-lg bg-[hsl(var(--primary))] flex items-center justify-center shrink-0">
             <span className="text-white text-sm font-bold">L</span>
           </div>
-          <span className="text-sm font-semibold tracking-tight text-[hsl(var(--foreground))]">
-            Loom
-          </span>
+          {!collapsed && (
+            <span className="text-sm font-semibold tracking-tight text-[hsl(var(--foreground))]">
+              Loom
+            </span>
+          )}
         </div>
         {isMobile && (
           <button onClick={onClose} className="p-1.5 rounded-md hover:bg-[hsl(var(--accent))]">
@@ -64,19 +91,68 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile }: Sid
               key={href}
               href={href}
               onClick={onClose}
+              title={collapsed ? label : undefined}
               className={cn(
-                "flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors duration-150",
+                "flex items-center rounded-md text-sm transition-colors duration-150",
+                collapsed ? "justify-center py-3 px-0" : "gap-2.5 px-3 py-2",
                 active
                   ? "bg-[hsl(var(--sidebar-item-active))] text-[hsl(var(--sidebar-item-active-text))] font-medium"
                   : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--sidebar-item-hover))] hover:text-[hsl(var(--foreground))]"
               )}
             >
-              <Icon size={16} />
-              {label}
-              {active && <ChevronRight size={14} className="ml-auto opacity-60" />}
+              <Icon size={collapsed ? 18 : 16} />
+              {!collapsed && (
+                <>
+                  {label}
+                  {active && <ChevronRight size={14} className="ml-auto opacity-60" />}
+                </>
+              )}
             </Link>
           );
         })}
+
+        {pins.length > 0 && (
+          <>
+            <div className="my-2 mx-3 border-t border-[hsl(var(--sidebar-border))]" />
+            {pins.map((pin) => {
+              const active = pathname === pin.href || pathname.startsWith(`${pin.href}/`);
+              return (
+                <div
+                  key={pin.id}
+                  className="relative group flex items-center"
+                  onContextMenu={(e: React.MouseEvent) => {
+                    e.preventDefault();
+                    document.getElementById(`sidebar-pin-menu-${pin.id}`)?.click();
+                  }}
+                  onTouchStart={() => handleLongPressStart(`sidebar-pin-menu-${pin.id}`)}
+                  onTouchMove={handleLongPressClear}
+                  onTouchEnd={handleLongPressEnd}
+                >
+                  <Link
+                    href={pin.href}
+                    onClick={onClose}
+                    title={collapsed ? pin.name : undefined}
+                    className={cn(
+                      "flex items-center rounded-md text-sm transition-colors duration-150 flex-1 min-w-0",
+                      collapsed ? "justify-center py-3 px-0" : "gap-2.5 px-3 py-2",
+                      active
+                        ? "bg-[hsl(var(--sidebar-item-active))] text-[hsl(var(--sidebar-item-active-text))] font-medium"
+                        : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--sidebar-item-hover))] hover:text-[hsl(var(--foreground))]"
+                    )}
+                  >
+                    <FolderOpen size={collapsed ? 18 : 16} className="shrink-0" />
+                    {!collapsed && (
+                      <span className="truncate pr-4">{pin.name}</span>
+                    )}
+                  </Link>
+                  {!collapsed && (
+                    <SidebarPinMenu pin={pin} onToggle={() => togglePin(pin)} />
+                  )}
+                </div>
+              );
+            })}
+          </>
+        )}
 
         {isOwner && (
           <>
@@ -84,35 +160,90 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile }: Sid
             <Link
               href="/settings"
               onClick={onClose}
+              title={collapsed ? "Settings" : undefined}
               className={cn(
-                "flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors duration-150",
+                "flex items-center rounded-md text-sm transition-colors duration-150",
+                collapsed ? "justify-center py-3 px-0" : "gap-2.5 px-3 py-2",
                 pathname === "/settings" || pathname.startsWith("/settings/")
                   ? "bg-[hsl(var(--sidebar-item-active))] text-[hsl(var(--sidebar-item-active-text))] font-medium"
                   : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--sidebar-item-hover))] hover:text-[hsl(var(--foreground))]"
               )}
             >
-              <Settings size={16} />
-              Settings
+              <Settings size={collapsed ? 18 : 16} />
+              {!collapsed && "Settings"}
             </Link>
           </>
         )}
       </nav>
 
       {/* Footer */}
-      <div className="px-3 py-3 border-t border-[hsl(var(--sidebar-border))] space-y-2">
-        <ArchiveStatusBadge />
-        <div className="flex items-center gap-2.5 px-1 py-1">
+      <div className={cn("px-3 py-3 border-t border-[hsl(var(--sidebar-border))] space-y-2", collapsed && "flex flex-col items-center px-0")}>
+        {!collapsed && <ArchiveStatusBadge />}
+        <div className={cn("flex items-center", collapsed ? "justify-center" : "gap-2.5 px-1 py-1")}>
           <div className="w-7 h-7 rounded-full bg-[hsl(var(--primary)/0.15)] flex items-center justify-center shrink-0">
             <span className="text-xs font-semibold text-[hsl(var(--primary))]">
               {userName.charAt(0).toUpperCase()}
             </span>
           </div>
-          <div className="min-w-0">
-            <p className="text-xs font-medium truncate">{userName}</p>
-            <p className="text-xs text-[hsl(var(--muted-foreground))] truncate">{userEmail}</p>
-          </div>
+          {!collapsed && (
+            <div className="min-w-0">
+              <p className="text-xs font-medium truncate">{userName}</p>
+              <p className="text-xs text-[hsl(var(--muted-foreground))] truncate">{userEmail}</p>
+            </div>
+          )}
         </div>
       </div>
     </aside>
   );
 }
+
+function SidebarPinMenu({ pin, onToggle }: { pin: { id: string, name: string, href: string }, onToggle: () => void }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) {
+      document.addEventListener("mousedown", handle);
+      return () => document.removeEventListener("mousedown", handle);
+    }
+  }, [open]);
+
+  return (
+    <div className="relative shrink-0 pr-2 opacity-0 group-hover:opacity-100 transition-opacity" ref={menuRef}>
+      <button
+        id={`sidebar-pin-menu-${pin.id}`}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className="p-1 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-all"
+      >
+        <MoreVertical size={16} />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-40 bg-[hsl(var(--card))] border rounded-xl shadow-lg py-1 animate-in-slide-up z-50">
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggle();
+              setOpen(false);
+            }}
+            className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-sm text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors"
+          >
+            <PinOff size={14} />
+            Unpin
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+

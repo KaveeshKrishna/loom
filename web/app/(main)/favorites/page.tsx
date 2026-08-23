@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { FileGrid } from "@/components/files/FileGrid";
 import { FileList } from "@/components/files/FileList";
-import { MediaViewer } from "@/components/viewer/MediaViewer";
+import { MediaViewer, type MediaSibling } from "@/components/viewer/MediaViewer";
 import { Loader2, Star } from "lucide-react";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
 import { useTopBar } from "@/components/layout/TopBarContext";
@@ -14,7 +14,7 @@ export default function FavoritesPage() {
   const [nodes, setNodes] = useState<FileNodeWithThumbnail[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
-  const [viewer, setViewer] = useState<{ node: FileNodeWithThumbnail } | null>(null);
+  const [viewer, setViewer] = useState<{ node: FileNodeWithThumbnail; siblings: MediaSibling[] } | null>(null);
   const { viewMode, setBreadcrumbs } = useTopBar();
 
   const load = () => {
@@ -57,9 +57,23 @@ export default function FavoritesPage() {
           <Loader2 size={24} className="animate-spin text-[hsl(var(--muted-foreground))]" />
         </div>
       ) : viewMode === "grid" ? (
-        <FileGrid nodes={nodes} onNavigate={(n) => n.type === "FILE" && setViewer({ node: n })} onFavorite={toggleFavorite} favoriteIds={favoriteIds} />
+        <FileGrid nodes={nodes} onNavigate={(n) => {
+          if (n.type !== "FILE") return;
+          const siblings: MediaSibling[] = nodes.filter(m => m.type === "FILE").map((fn) => ({
+            id: fn.id, name: fn.name, relativePath: fn.relativePath,
+            mimeType: fn.mimeType, cachePath: fn.preview?.cachePath || fn.thumbnail?.cachePath,
+          }));
+          setViewer({ node: n, siblings });
+        }} onFavorite={toggleFavorite} favoriteIds={favoriteIds} />
       ) : (
-        <FileList nodes={nodes} onNavigate={(n) => n.type === "FILE" && setViewer({ node: n })} onFavorite={toggleFavorite} favoriteIds={favoriteIds} />
+        <FileList nodes={nodes} onNavigate={(n) => {
+          if (n.type !== "FILE") return;
+          const siblings: MediaSibling[] = nodes.filter(m => m.type === "FILE").map((fn) => ({
+            id: fn.id, name: fn.name, relativePath: fn.relativePath,
+            mimeType: fn.mimeType, cachePath: fn.preview?.cachePath || fn.thumbnail?.cachePath,
+          }));
+          setViewer({ node: n, siblings });
+        }} onFavorite={toggleFavorite} favoriteIds={favoriteIds} />
       )}
       {viewer && (
         <MediaViewer
@@ -68,8 +82,12 @@ export default function FavoritesPage() {
           name={viewer.node.name}
           mimeType={viewer.node.mimeType}
           onClose={() => setViewer(null)}
-          hasPrev={false}
-          hasNext={false}
+          siblings={viewer.siblings}
+          currentId={viewer.node.id}
+          onNavigateTo={(s) => {
+            const fullNode = nodes.find((n) => n.id === s.id);
+            if (fullNode) setViewer((v) => v ? { ...v, node: fullNode } : null);
+          }}
         />
       )}
     </div>

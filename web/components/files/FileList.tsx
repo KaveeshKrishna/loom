@@ -1,8 +1,10 @@
 "use client";
+import React, { useRef } from "react";
 
 import { Folder, FileText, Image as ImageIcon, Video, Music, File, Star, Download, ChevronRight } from "lucide-react";
 import { cn, formatBytes, formatDate, getFileCategory } from "@/lib/utils";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
+import { FolderMenu } from "./FolderMenu";
 
 type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
 
@@ -11,6 +13,7 @@ interface FileListProps {
   onNavigate: (node: FileNodeWithThumbnail) => void;
   onFavorite?: (nodeId: string) => void;
   favoriteIds?: Set<string>;
+  showPath?: boolean;
 }
 
 function FileIcon({ mimeType, type, size = 16 }: { mimeType: string | null; type: string; size?: number }) {
@@ -23,7 +26,10 @@ function FileIcon({ mimeType, type, size = 16 }: { mimeType: string | null; type
   return <File size={size} className="text-[hsl(var(--muted-foreground))]" />;
 }
 
-export function FileList({ nodes, onNavigate, onFavorite, favoriteIds }: FileListProps) {
+export function FileList({ nodes, onNavigate, onFavorite, favoriteIds, showPath }: FileListProps) {
+  const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
+
   if (nodes.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-[hsl(var(--muted-foreground))]">
@@ -51,12 +57,51 @@ export function FileList({ nodes, onNavigate, onFavorite, favoriteIds }: FileLis
         <div
           key={node.id}
           className="group grid grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-[hsl(var(--accent)/0.5)] transition-colors cursor-pointer"
-          onClick={() => onNavigate(node)}
+          onClick={(e) => {
+            if (longPressFiredRef.current) {
+              e.preventDefault();
+              e.stopPropagation();
+              return;
+            }
+            onNavigate(node);
+          }}
+          onContextMenu={(e: React.MouseEvent) => {
+            if (node.type === "DIRECTORY") {
+              e.preventDefault();
+              document.getElementById(`folder-menu-btn-${node.id}`)?.click();
+            }
+          }}
+          onTouchStart={() => {
+            if (node.type === "DIRECTORY") {
+              longPressFiredRef.current = false;
+              touchTimerRef.current = setTimeout(() => {
+                longPressFiredRef.current = true;
+                document.getElementById(`folder-menu-btn-${node.id}`)?.click();
+              }, 500);
+            }
+          }}
+          onTouchMove={() => { 
+            if (touchTimerRef.current) clearTimeout(touchTimerRef.current); 
+            longPressFiredRef.current = false;
+          }}
+          onTouchEnd={(e) => { 
+            if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
+            if (longPressFiredRef.current) {
+              if (e.cancelable) e.preventDefault();
+            }
+          }}
           id={`file-row-${node.id}`}
         >
           <div className="col-span-6 flex items-center gap-2.5 min-w-0">
             <FileIcon mimeType={node.mimeType} type={node.type} />
-            <span className="text-sm font-medium truncate">{node.name}</span>
+            <div className="flex flex-col min-w-0 flex-1">
+              <span className="text-sm font-medium truncate">{node.name}</span>
+              {showPath && (
+                <span className="text-xs text-[hsl(var(--muted-foreground))] truncate">
+                  {node.relativePath.split("/").slice(0, -1).join("/") || "/"}
+                </span>
+              )}
+            </div>
             {node.type === "DIRECTORY" && (
               <ChevronRight size={14} className="ml-auto text-[hsl(var(--muted-foreground))] opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
             )}
@@ -89,6 +134,11 @@ export function FileList({ nodes, onNavigate, onFavorite, favoriteIds }: FileLis
               >
                 <Download size={13} />
               </a>
+            )}
+            {node.type === "DIRECTORY" && (
+              <div className="transition-all">
+                <FolderMenu node={node} />
+              </div>
             )}
           </div>
         </div>

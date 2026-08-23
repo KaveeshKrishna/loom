@@ -41,11 +41,17 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  // Filter to only direct children (one level deep)
-  const children = allNodes.filter((node) => {
+  // Filter to only direct children (one level deep) and check ACL for each child
+  const children = [];
+  for (const node of allNodes) {
     const rest = node.relativePath.slice(prefix.length);
-    return !rest.includes("/");
-  });
+    if (!rest.includes("/")) {
+      const isAllowed = await checkAccess(user.id, user.role, node.relativePath);
+      if (isAllowed) {
+        children.push(node);
+      }
+    }
+  }
 
   return NextResponse.json({ path, children: serializeNodes(children) });
 }
