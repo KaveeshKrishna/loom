@@ -73,7 +73,7 @@ export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
           onContextMenu={(e: React.MouseEvent) => {
             if (node.type === "DIRECTORY") {
               e.preventDefault();
-              document.getElementById(`folder-menu-btn-${node.id}`)?.click();
+              document.getElementById(`folder-menu-btn-${node.id}`)?.dispatchEvent(new CustomEvent("open-menu"));
             }
           }}
           onTouchStart={() => {
@@ -81,7 +81,7 @@ export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
               longPressFiredRef.current = false;
               touchTimerRef.current = setTimeout(() => {
                 longPressFiredRef.current = true;
-                document.getElementById(`folder-menu-btn-${node.id}`)?.click();
+                document.getElementById(`folder-menu-btn-${node.id}`)?.dispatchEvent(new CustomEvent("open-menu"));
               }, 500);
             }
           }}
@@ -95,7 +95,7 @@ export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
               if (e.cancelable) e.preventDefault();
             }
           }}
-          className="group relative flex flex-col gap-2 p-3 rounded-xl border bg-[hsl(var(--card))] hover:border-[hsl(var(--primary)/0.3)] hover:shadow-md transition-all duration-150 text-left animate-in-fade"
+          className="group relative flex flex-col gap-2 p-3 rounded-xl border bg-[hsl(var(--card))] hover:border-[hsl(var(--primary)/0.3)] hover:shadow-md active:scale-[0.98] active:bg-[hsl(var(--accent)/0.5)] transition-all duration-150 text-left animate-in-fade"
         >
           {/* Thumbnail or icon */}
           <div className="aspect-square rounded-lg bg-[hsl(var(--accent))] flex items-center justify-center overflow-hidden">

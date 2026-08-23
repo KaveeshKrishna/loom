@@ -56,7 +56,7 @@ export function FileList({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
       {sorted.map((node) => (
         <div
           key={node.id}
-          className="group grid grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-[hsl(var(--accent)/0.5)] transition-colors cursor-pointer"
+          className="group grid grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-[hsl(var(--accent)/0.5)] active:bg-[hsl(var(--accent))] active:scale-[0.99] transition-all cursor-pointer"
           onClick={(e) => {
             if (longPressFiredRef.current) {
               e.preventDefault();
@@ -68,7 +68,7 @@ export function FileList({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
           onContextMenu={(e: React.MouseEvent) => {
             if (node.type === "DIRECTORY") {
               e.preventDefault();
-              document.getElementById(`folder-menu-btn-${node.id}`)?.click();
+              document.getElementById(`folder-menu-btn-${node.id}`)?.dispatchEvent(new CustomEvent("open-menu"));
             }
           }}
           onTouchStart={() => {
@@ -76,7 +76,7 @@ export function FileList({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
               longPressFiredRef.current = false;
               touchTimerRef.current = setTimeout(() => {
                 longPressFiredRef.current = true;
-                document.getElementById(`folder-menu-btn-${node.id}`)?.click();
+                document.getElementById(`folder-menu-btn-${node.id}`)?.dispatchEvent(new CustomEvent("open-menu"));
               }, 500);
             }
           }}
