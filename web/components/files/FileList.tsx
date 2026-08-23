@@ -118,7 +118,7 @@ export function FileList({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
                 id={`favorite-row-${node.id}`}
                 onClick={(e) => { e.stopPropagation(); onFavorite(node.id); }}
                 className={cn(
-                  "p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-all",
+                  "p-1.5 rounded-md lg:opacity-0 lg:group-hover:opacity-100 opacity-100 transition-all",
                   favoriteIds?.has(node.id) ? "opacity-100 text-amber-500" : "text-[hsl(var(--muted-foreground))] hover:text-amber-500"
                 )}
               >
@@ -130,7 +130,7 @@ export function FileList({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
                 id={`download-${node.id}`}
                 href={`/api/files/serve?path=${encodeURIComponent(node.relativePath)}&download=1`}
                 onClick={(e) => e.stopPropagation()}
-                className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-all"
+                className="p-1.5 rounded-md lg:opacity-0 lg:group-hover:opacity-100 opacity-100 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-all"
               >
                 <Download size={13} />
               </a>

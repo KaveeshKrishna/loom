@@ -98,12 +98,10 @@ function MainShellInner({ children, userName, userEmail, isOwner }: MainShellPro
           id="main-content"
         >
           {searchGlobal && searchQuery ? (
-            <div className="absolute inset-0 z-20 bg-[hsl(var(--background))]">
-              <GlobalSearchResults 
-                query={searchQuery} 
-                onClose={() => { setSearchQuery(""); setSearchGlobal(false); }} 
-              />
-            </div>
+            <GlobalSearchResults 
+              query={searchQuery} 
+              onClose={() => { setSearchQuery(""); setSearchGlobal(false); }} 
+            />
           ) : (
             children
           )}

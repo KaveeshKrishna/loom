@@ -48,8 +48,7 @@ export function MediaViewer({
   const [needsTranscode, setNeedsTranscode] = useState<boolean | null>(null);
 
   const category = getFileCategory(mimeType, name);
-  const ext = name.split(".").pop()?.toLowerCase() || "";
-  const isUnsupportedVideo = category === "video" && ["mpg", "mpeg", "avi", "mkv", "wmv", "flv"].includes(ext);
+  const isUnsupportedVideo = false; // we now use ffmpeg to transcode any unsupported codecs (like .mpg)
   const serveSrc = `/api/files/serve?path=${encodeURIComponent(relativePath)}`;
   const transcodeSrc = `/api/files/transcode?path=${encodeURIComponent(relativePath)}`;
   const src = (category === "image" || category === "video") && cachePath
