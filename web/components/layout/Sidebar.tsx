@@ -39,7 +39,7 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, colla
     longPressFiredRef.current = false;
     touchTimerRef.current = setTimeout(() => {
       longPressFiredRef.current = true;
-      document.getElementById(id)?.click();
+      document.getElementById(id)?.dispatchEvent(new CustomEvent("open-menu"));
     }, 500);
   }, []);
 
@@ -93,7 +93,7 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, colla
               onClick={onClose}
               title={collapsed ? label : undefined}
               className={cn(
-                "flex items-center rounded-md text-sm transition-colors duration-150",
+                "flex items-center rounded-md text-sm transition-all duration-150 active:scale-[0.98]",
                 collapsed ? "justify-center py-3 px-0" : "gap-2.5 px-3 py-2",
                 active
                   ? "bg-[hsl(var(--sidebar-item-active))] text-[hsl(var(--sidebar-item-active-text))] font-medium"
@@ -122,7 +122,7 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, colla
                   className="relative group flex items-center"
                   onContextMenu={(e: React.MouseEvent) => {
                     e.preventDefault();
-                    document.getElementById(`sidebar-pin-menu-${pin.id}`)?.click();
+                    document.getElementById(`sidebar-pin-menu-${pin.id}`)?.dispatchEvent(new CustomEvent("open-menu"));
                   }}
                   onTouchStart={() => handleLongPressStart(`sidebar-pin-menu-${pin.id}`)}
                   onTouchMove={handleLongPressClear}
@@ -130,10 +130,16 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, colla
                 >
                   <Link
                     href={pin.href}
-                    onClick={onClose}
+                    onClick={(e) => {
+                      if (longPressFiredRef.current) {
+                        e.preventDefault();
+                        return;
+                      }
+                      if (onClose) onClose();
+                    }}
                     title={collapsed ? pin.name : undefined}
                     className={cn(
-                      "flex items-center rounded-md text-sm transition-colors duration-150 flex-1 min-w-0",
+                      "flex items-center rounded-md text-sm transition-all duration-150 flex-1 min-w-0 active:scale-[0.98]",
                       collapsed ? "justify-center py-3 px-0" : "gap-2.5 px-3 py-2",
                       active
                         ? "bg-[hsl(var(--sidebar-item-active))] text-[hsl(var(--sidebar-item-active-text))] font-medium"
@@ -162,7 +168,7 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, colla
               onClick={onClose}
               title={collapsed ? "Settings" : undefined}
               className={cn(
-                "flex items-center rounded-md text-sm transition-colors duration-150",
+                "flex items-center rounded-md text-sm transition-all duration-150 active:scale-[0.98]",
                 collapsed ? "justify-center py-3 px-0" : "gap-2.5 px-3 py-2",
                 pathname === "/settings" || pathname.startsWith("/settings/")
                   ? "bg-[hsl(var(--sidebar-item-active))] text-[hsl(var(--sidebar-item-active-text))] font-medium"
@@ -202,19 +208,26 @@ function SidebarPinMenu({ pin, onToggle }: { pin: { id: string, name: string, hr
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    function handle(e: MouseEvent) {
+    function handle(e: Event) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     }
     if (open) {
-      document.addEventListener("mousedown", handle);
-      return () => document.removeEventListener("mousedown", handle);
+      document.addEventListener("pointerdown", handle);
+      return () => document.removeEventListener("pointerdown", handle);
     }
   }, [open]);
 
+  useEffect(() => {
+    const btn = document.getElementById(`sidebar-pin-menu-${pin.id}`);
+    const handleOpen = () => setOpen(true);
+    btn?.addEventListener("open-menu", handleOpen);
+    return () => btn?.removeEventListener("open-menu", handleOpen);
+  }, [pin.id]);
+
   return (
-    <div className="relative shrink-0 pr-2 opacity-0 group-hover:opacity-100 transition-opacity" ref={menuRef}>
+    <div className="relative shrink-0 pr-2 lg:opacity-0 lg:group-hover:opacity-100 opacity-100 transition-opacity" ref={menuRef}>
       <button
         id={`sidebar-pin-menu-${pin.id}`}
         onClick={(e) => {

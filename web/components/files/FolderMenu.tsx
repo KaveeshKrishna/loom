@@ -14,16 +14,23 @@ export function FolderMenu({ node }: { node: FileNode }) {
   const isPinned = pins.some((p) => p.id === node.id);
 
   useEffect(() => {
-    function handle(e: MouseEvent) {
+    function handle(e: Event) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     }
     if (open) {
-      document.addEventListener("mousedown", handle);
-      return () => document.removeEventListener("mousedown", handle);
+      document.addEventListener("pointerdown", handle);
+      return () => document.removeEventListener("pointerdown", handle);
     }
   }, [open]);
+
+  useEffect(() => {
+    const btn = document.getElementById(`folder-menu-btn-${node.id}`);
+    const handleOpen = () => setOpen(true);
+    btn?.addEventListener("open-menu", handleOpen);
+    return () => btn?.removeEventListener("open-menu", handleOpen);
+  }, [node.id]);
 
   const handleTogglePin = () => {
     togglePin({ id: node.id, name: node.name, href: `/files/${node.relativePath}` });
