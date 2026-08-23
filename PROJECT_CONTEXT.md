@@ -60,3 +60,6 @@
 - Added active scale and color transitions to buttons and list items across FileGrid, FileList, and Sidebar for immediate visual feedback on touch/click.
 - Resolved a bug where long-pressing pinned sidebar items on mobile incorrectly navigated and closed the sidebar instead of opening the context menu.
 - Adjusted the SidebarPinMenu 3-dots icon to be visible on touch devices (mobile and tablet) rather than relying exclusively on group-hover, which doesn't exist on touch.
+- Updated Global Search to seamlessly render inside the main content area (using `FileGrid` or `FileList` based on `viewMode`) without a disruptive overlay or custom header, making it feel like filtering the current folder.
+- Removed `isUnsupportedVideo` hardcoded extension check in `MediaViewer.tsx` so all natively unsupported videos (including `.mpg`) are automatically probed and transcoded via `ffmpeg`.
+- Fixed an issue where the Star and Download buttons on files in list/grid views were completely hidden on touch devices (phones/tablets). They are now permanently visible on mobile while remaining hover-only on desktop.
