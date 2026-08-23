@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { FileList } from "@/components/files/FileList";
-import { MediaViewer } from "@/components/viewer/MediaViewer";
+import { MediaViewer, type MediaSibling } from "@/components/viewer/MediaViewer";
 import { Loader2, Clock } from "lucide-react";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
 
@@ -11,7 +11,7 @@ type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: 
 export default function RecentPage() {
   const [nodes, setNodes] = useState<FileNodeWithThumbnail[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewer, setViewer] = useState<{ node: FileNodeWithThumbnail } | null>(null);
+  const [viewer, setViewer] = useState<{ node: FileNodeWithThumbnail; siblings: MediaSibling[] } | null>(null);
 
   useEffect(() => {
     fetch("/api/files/recent")
@@ -34,7 +34,14 @@ export default function RecentPage() {
           <Loader2 size={24} className="animate-spin text-[hsl(var(--muted-foreground))]" />
         </div>
       ) : (
-        <FileList nodes={nodes} onNavigate={(n) => n.type === "FILE" && setViewer({ node: n })} />
+        <FileList nodes={nodes} onNavigate={(n) => {
+          if (n.type !== "FILE") return;
+          const siblings: MediaSibling[] = nodes.filter(m => m.type === "FILE").map((fn) => ({
+            id: fn.id, name: fn.name, relativePath: fn.relativePath,
+            mimeType: fn.mimeType, cachePath: fn.preview?.cachePath || fn.thumbnail?.cachePath,
+          }));
+          setViewer({ node: n, siblings });
+        }} />
       )}
       {viewer && (
         <MediaViewer
@@ -43,8 +50,12 @@ export default function RecentPage() {
           name={viewer.node.name}
           mimeType={viewer.node.mimeType}
           onClose={() => setViewer(null)}
-          hasPrev={false}
-          hasNext={false}
+          siblings={viewer.siblings}
+          currentId={viewer.node.id}
+          onNavigateTo={(s) => {
+            const fullNode = nodes.find((n) => n.id === s.id);
+            if (fullNode) setViewer((v) => v ? { ...v, node: fullNode } : null);
+          }}
         />
       )}
     </div>

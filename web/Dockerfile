@@ -2,8 +2,8 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 
-# Install build tools for native modules (sharp)
-RUN apk add --no-cache libc6-compat
+# Install build tools for native modules (sharp) and ffmpeg
+RUN apk add --no-cache libc6-compat ffmpeg
 
 COPY package.json ./
 RUN npm install --legacy-peer-deps
@@ -27,6 +27,9 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+
+# Install ffmpeg for video transcoding/probing
+RUN apk add --no-cache ffmpeg
 
 # Use the built-in node user (UID 1000) which matches host mount ownership
 

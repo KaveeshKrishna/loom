@@ -14,20 +14,25 @@ export async function GET(req: NextRequest) {
   const user = await prisma.user.findUnique({ where: { email: session.user.email! } });
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
-  if (q.length < 1) return NextResponse.json({ results: [] });
-
-  const folder = req.nextUrl.searchParams.get("folder")?.trim();
-  const folderPrefix = folder ? `${folder}/` : "";
+  const type = req.nextUrl.searchParams.get("type") ?? "";
+  
+  let mimeTypeFilter: object = {};
+  if (type === "image") {
+    mimeTypeFilter = { startsWith: "image/" };
+  } else if (type === "video") {
+    mimeTypeFilter = { startsWith: "video/" };
+  } else if (type === "document") {
+    mimeTypeFilter = { startsWith: "application/" }; // simplistic view for documents
+  } else {
+    return NextResponse.json({ nodes: [] });
+  }
 
   const results = await prisma.fileNode.findMany({
     where: {
       isVisible: true,
-      name: { contains: q, mode: "insensitive" },
-      ...(folderPrefix ? { relativePath: { startsWith: folderPrefix } } : {}),
+      mimeType: mimeTypeFilter,
     },
     include: { thumbnail: true, preview: true },
-    take: 50,
     orderBy: { updatedAt: "desc" },
   });
 
@@ -39,8 +44,8 @@ export async function GET(req: NextRequest) {
         return allowed ? r : null;
       })
     );
-    return NextResponse.json({ results: serializeNodes(filtered.filter(Boolean) as typeof results) });
+    return NextResponse.json({ nodes: serializeNodes(filtered.filter(Boolean) as typeof results) });
   }
 
-  return NextResponse.json({ results: serializeNodes(results) });
+  return NextResponse.json({ nodes: serializeNodes(results) });
 }

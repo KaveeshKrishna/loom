@@ -25,6 +25,10 @@ export default function RootLayout({
                   if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
                     document.documentElement.classList.add('dark');
                   }
+                  var s = localStorage.getItem('loom-sidebar');
+                  if (s === 'false') {
+                    document.documentElement.classList.add('sidebar-collapsed');
+                  }
                 } catch(e) {}
               })();
             `,

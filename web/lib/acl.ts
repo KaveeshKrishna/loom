@@ -14,8 +14,8 @@ export async function checkAccess(
   // Owner has unconditional access to everything
   if (userRole === "OWNER") return true;
 
-  // Normalize path: remove leading slashes, lowercase
-  const normalizedPath = requestedPath.replace(/^\/+/, "");
+  // Normalize path: remove leading and trailing slashes
+  const normalizedPath = requestedPath.replace(/^\/+|\/+$/g, "");
 
   // Fetch all ACL rules for this user
   const rules = await prisma.aclRule.findMany({
@@ -23,11 +23,11 @@ export async function checkAccess(
     orderBy: { path: "asc" },
   });
 
-  if (rules.length === 0) return false;
+  if (rules.length === 0) return true; // Default allow if no rules
 
   // Find all rules whose path is a prefix of (or exactly) the requested path
   const matchingRules = rules.filter((rule) => {
-    const rulePath = rule.path.replace(/^\/+/, "");
+    const rulePath = rule.path.replace(/^\/+|\/+$/g, "");
     // Either the rule path exactly matches or it's a parent directory
     return (
       normalizedPath === rulePath ||
@@ -35,14 +35,26 @@ export async function checkAccess(
     );
   });
 
-  if (matchingRules.length === 0) return false;
+  // Default to true (allow) if no prefix rule explicitly denies
+  let isAllowed = true;
+  if (matchingRules.length > 0) {
+    // The deepest matching rule (longest path) wins
+    const deepestRule = matchingRules.reduce((prev, curr) =>
+      curr.path.length > prev.path.length ? curr : prev
+    );
+    isAllowed = deepestRule.allow;
+  }
 
-  // The deepest matching rule (longest path) wins
-  const deepestRule = matchingRules.reduce((prev, curr) =>
-    curr.path.length > prev.path.length ? curr : prev
-  );
+  if (isAllowed) return true;
 
-  return deepestRule.allow;
+  // If explicitly denied, check if any descendant path is explicitly allowed.
+  // This allows traversing the tree down to the allowed folder.
+  const hasAllowedDescendant = rules.some((rule) => {
+    const rulePath = rule.path.replace(/^\/+|\/+$/g, "");
+    return rule.allow === true && rulePath.startsWith(normalizedPath + "/");
+  });
+
+  return hasAllowedDescendant;
 }
 
 /**
@@ -73,12 +85,6 @@ export async function getAllowedRoots(
   userId: string,
   userRole: Role
 ): Promise<string[]> {
-  if (userRole === "OWNER") return [""];
-
-  const rules = await prisma.aclRule.findMany({
-    where: { userId, allow: true },
-    orderBy: { path: "asc" },
-  });
-
-  return rules.map((r) => r.path.replace(/^\/+/, ""));
+  const rootAllowed = await checkAccess(userId, userRole, "");
+  return rootAllowed ? [""] : [];
 }

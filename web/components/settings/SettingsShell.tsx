@@ -21,20 +21,20 @@ export function SettingsShell() {
   const [activeTab, setActiveTab] = useState("users");
 
   return (
-    <div className="flex h-full">
+    <div className="flex flex-col md:flex-row h-full">
       {/* Settings sidebar */}
-      <div className="w-52 border-r shrink-0 py-4 px-2">
-        <h2 className="text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider px-3 mb-2">
+      <div className="w-full md:w-48 border-b md:border-b-0 md:border-r shrink-0 py-2 md:py-4 px-2 overflow-x-auto no-scrollbar">
+        <h2 className="hidden md:block text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider px-3 mb-2">
           Settings
         </h2>
-        <nav className="space-y-0.5">
+        <nav className="flex md:flex-col space-x-1 md:space-x-0 md:space-y-0.5">
           {tabs.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               id={`settings-tab-${id}`}
               onClick={() => setActiveTab(id)}
               className={cn(
-                "flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
+                "flex items-center gap-2.5 md:w-full text-left px-3 py-2 rounded-md text-sm transition-colors whitespace-nowrap shrink-0",
                 activeTab === id
                   ? "bg-[hsl(var(--sidebar-item-active))] text-[hsl(var(--sidebar-item-active-text))] font-medium"
                   : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))] hover:text-[hsl(var(--foreground))]"
