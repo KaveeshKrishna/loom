@@ -33,6 +33,12 @@ All three pages now behave identically to `files/[...path]/page.tsx`:
 - ✅ `docker compose build loom-web` — exit code 0 (Session 13, 2026-08-25)
 - ✅ `docker compose up -d loom-web` — healthy
 
+### Performance Optimizations (2026-08-25)
+- **Universal Loading Optimization:** Large directories (e.g., Photos with 5k+ images) were causing main thread jank and blocked navigation.
+- Added cursor-based pagination and `useInfiniteNodes` hook with `IntersectionObserver` to batch load items 100 at a time on `photos/page.tsx`, `videos/page.tsx`, `documents/page.tsx`, and `favorites/page.tsx`.
+- Integrated `AbortController` universally to all API fetch calls (`files/[...path]/page.tsx`, `recent/page.tsx`, etc.) to instantly cancel pending requests on unmount, allowing snappy navigation.
+- Enabled `decoding="async"` for image thumbnails in `FileGrid` to move decoding off the main thread.
+
 
 
 ## Session 10 Fix — Video Thumbnails Not Showing in FileGrid
