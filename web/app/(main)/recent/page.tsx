@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { FileList } from "@/components/files/FileList";
 import { MediaViewer, type MediaSibling } from "@/components/viewer/MediaViewer";
 import { Loader2, Clock } from "lucide-react";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
-import { sortNodes } from "@/lib/utils";
 
 type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
 
