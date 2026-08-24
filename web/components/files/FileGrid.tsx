@@ -1,11 +1,13 @@
 "use client";
 import React, { useRef } from "react";
 
-import { Folder, FileText, Image as ImageIcon, Video, Music, File, Star } from "lucide-react";
+import { Folder, FileText, Image as ImageIcon, Video, Music, File, MoreVertical } from "lucide-react";
 import { cn, formatBytes, getFileCategory } from "@/lib/utils";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
-import { FolderMenu } from "./FolderMenu";
 import { useTopBar } from "../layout/TopBarContext";
+import { useContextMenu } from "@/hooks/useContextMenu";
+import { ContextMenu } from "./ContextMenu";
+import { FolderSize } from "./FolderSize";
 
 type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
 
@@ -30,6 +32,7 @@ function FileIcon({ mimeType, type }: { mimeType: string | null; type: string })
 export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds, showPath }: FileGridProps) {
   const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFiredRef = useRef(false);
+  const contextMenu = useContextMenu();
 
   // Hooks must be called before any early returns
   const { gridSize } = useTopBar();
@@ -65,19 +68,15 @@ export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
             onNavigate(node);
           }}
           onContextMenu={(e: React.MouseEvent) => {
-            if (node.type === "DIRECTORY") {
-              e.preventDefault();
-              document.getElementById(`folder-menu-btn-${node.id}`)?.dispatchEvent(new CustomEvent("open-menu"));
-            }
+            e.preventDefault();
+            contextMenu.open(e, node);
           }}
-          onTouchStart={() => {
-            if (node.type === "DIRECTORY") {
-              longPressFiredRef.current = false;
-              touchTimerRef.current = setTimeout(() => {
-                longPressFiredRef.current = true;
-                document.getElementById(`folder-menu-btn-${node.id}`)?.dispatchEvent(new CustomEvent("open-menu"));
-              }, 500);
-            }
+          onTouchStart={(e: React.TouchEvent) => {
+            longPressFiredRef.current = false;
+            touchTimerRef.current = setTimeout(() => {
+              longPressFiredRef.current = true;
+              contextMenu.open(e, node);
+            }, 500);
           }}
           onTouchMove={() => { 
             if (touchTimerRef.current) clearTimeout(touchTimerRef.current); 
@@ -119,34 +118,39 @@ export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
           </div>
 
           {/* Size */}
-          {node.size != null && node.type === "FILE" && (
-            <p className="text-xs text-[hsl(var(--muted-foreground))]">{formatBytes(node.size)}</p>
-          )}
+          {node.type === "FILE" && node.size != null ? (
+            <p className="text-[10px] sm:text-xs text-[hsl(var(--muted-foreground))]">{formatBytes(node.size)}</p>
+          ) : node.type === "DIRECTORY" ? (
+            <p className="text-[10px] sm:text-xs text-[hsl(var(--muted-foreground))]"><FolderSize path={node.relativePath} /></p>
+          ) : null}
 
-          {/* Favorite button */}
-          {onFavorite && node.type === "FILE" && (
-            <button
-              id={`favorite-${node.id}`}
-              onClick={(e) => { e.stopPropagation(); onFavorite(node.id); }}
-              className={cn(
-                "absolute top-2 right-2 p-1 rounded-md opacity-0 group-hover:opacity-100 transition-all",
-                favoriteIds?.has(node.id)
-                  ? "opacity-100 text-amber-500"
-                  : "text-[hsl(var(--muted-foreground))] hover:text-amber-500 bg-[hsl(var(--background)/0.8)]"
-              )}
-            >
-              <Star size={13} fill={favoriteIds?.has(node.id) ? "currentColor" : "none"} />
-            </button>
-          )}
-
-          {/* Folder Menu */}
-          {node.type === "DIRECTORY" && (
-            <div className="absolute top-2 right-2 transition-all">
-              <FolderMenu node={node} />
-            </div>
-          )}
+          {/* Action Menu Button (3 dots) for ALL nodes */}
+          <button
+            onClick={(e: React.MouseEvent) => {
+              e.stopPropagation();
+              contextMenu.open(e, node, { current: e.currentTarget as HTMLElement });
+            }}
+            className={cn(
+              "absolute top-2 right-2 p-1.5 rounded-md transition-all shadow-sm",
+              favoriteIds?.has(node.id) 
+                ? "text-amber-500 bg-[hsl(var(--background)/0.8)] opacity-100" 
+                : "text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] bg-[hsl(var(--background)/0.8)] hover:bg-[hsl(var(--background))] opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+            )}
+          >
+            <MoreVertical size={16} />
+          </button>
         </button>
       ))}
+      
+      {contextMenu.isOpen && contextMenu.node && contextMenu.position && (
+        <ContextMenu 
+          node={contextMenu.node} 
+          position={contextMenu.position} 
+          onClose={contextMenu.close} 
+          onFavorite={onFavorite} 
+          isFavorite={favoriteIds?.has(contextMenu.node.id)} 
+        />
+      )}
     </div>
   );
 }

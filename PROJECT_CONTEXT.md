@@ -1,7 +1,19 @@
 # Loom Project Context
 
 ## Last Updated
-2026-08-24 (Session 12)
+2026-08-25 (Session 14 — continued)
+
+## Session 14 — Context Menus and Folder Sizes
+
+### Dynamic Folder Size
+- **New API:** `/api/files/size` uses `prisma.fileNode.aggregate` to quickly sum file sizes under a directory using a lightweight PostgreSQL query (`SUM(size)`). This completely avoids reading from the idle SSD.
+- **Note on Behavior:** Because it strictly uses the DB, the folder sizes will only include new files (added manually via another machine) after the user runs a manual **Rescan** from the dashboard. This was an explicit architectural decision to preserve the idle SSD state.
+- **New Component:** `<FolderSize />` asynchronously fetches the folder size without blocking page rendering, showing a subtle `...` loading state. Integrated into both `FileList` and `FileGrid`.
+
+### Windows-Style Context Menus
+- **New Hook & Component:** Added `useContextMenu` and `<ContextMenu />`. The menu renders via a React Portal and calculates boundaries to ensure it never overflows the screen (flips upwards/leftwards as needed).
+- **Interactions:** Triggers on right-click (desktop) and long-press (mobile). Also triggers when clicking the 3-dots menu on folders.
+- **Unified Action Menu:** Individual Star and Download buttons have been removed from List and Grid views. All file and folder actions are now unified under a single 3-dots context menu button in `FileList`, `FileGrid`, and `Sidebar` (pinned folders). This guarantees consistent behavior across all devices and input methods.
 
 ## Session 12 — Page Unification, Loading Skeletons & Video Buffering Fix
 

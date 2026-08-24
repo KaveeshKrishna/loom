@@ -3,14 +3,18 @@ import React from "react";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useRef, useCallback } from "react";
 import {
   Star, FolderOpen, Image, Video, FileText,
-  Settings, ChevronRight, X, MoreVertical, PinOff
+  Settings, ChevronRight, X, MoreVertical
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ArchiveStatusBadge } from "@/components/ui/ArchiveStatusBadge";
 import { useTopBar } from "./TopBarContext";
+
+import { useContextMenu } from "@/hooks/useContextMenu";
+import { ContextMenu } from "../files/ContextMenu";
+import type { FileNode } from "@prisma/client";
 
 const navItems = [
   { href: "/files", label: "All Files", icon: FolderOpen },
@@ -31,17 +35,10 @@ interface SidebarProps {
 
 export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, collapsed }: SidebarProps) {
   const pathname = usePathname();
-  const { pins, togglePin } = useTopBar();
+  const { pins } = useTopBar();
   const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFiredRef = useRef(false);
-
-  const handleLongPressStart = useCallback((id: string) => {
-    longPressFiredRef.current = false;
-    touchTimerRef.current = setTimeout(() => {
-      longPressFiredRef.current = true;
-      document.getElementById(id)?.dispatchEvent(new CustomEvent("open-menu"));
-    }, 500);
-  }, []);
+  const contextMenu = useContextMenu();
 
   const handleLongPressClear = useCallback(() => {
     if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
@@ -116,15 +113,23 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, colla
             <div className="my-2 mx-3 border-t border-[hsl(var(--sidebar-border))]" />
             {pins.map((pin) => {
               const active = pathname === pin.href || pathname.startsWith(`${pin.href}/`);
+              const mockNode = { id: pin.id, type: "DIRECTORY", name: pin.name, relativePath: pin.href.replace("/files/", "") } as FileNode;
+              
               return (
                 <div
                   key={pin.id}
                   className="relative group flex items-center"
                   onContextMenu={(e: React.MouseEvent) => {
                     e.preventDefault();
-                    document.getElementById(`sidebar-pin-menu-${pin.id}`)?.dispatchEvent(new CustomEvent("open-menu"));
+                    contextMenu.open(e, mockNode);
                   }}
-                  onTouchStart={() => handleLongPressStart(`sidebar-pin-menu-${pin.id}`)}
+                  onTouchStart={(e: React.TouchEvent) => {
+                    longPressFiredRef.current = false;
+                    touchTimerRef.current = setTimeout(() => {
+                      longPressFiredRef.current = true;
+                      contextMenu.open(e, mockNode);
+                    }, 500);
+                  }}
                   onTouchMove={handleLongPressClear}
                   onTouchEnd={handleLongPressEnd}
                 >
@@ -152,7 +157,18 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, colla
                     )}
                   </Link>
                   {!collapsed && (
-                    <SidebarPinMenu pin={pin} onToggle={() => togglePin(pin)} />
+                    <div className="relative shrink-0 pr-2 lg:opacity-0 lg:group-hover:opacity-100 opacity-100 transition-opacity">
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          contextMenu.open(e, mockNode, { current: e.currentTarget as HTMLElement });
+                        }}
+                        className="p-1 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-all"
+                      >
+                        <MoreVertical size={16} />
+                      </button>
+                    </div>
                   )}
                 </div>
               );
@@ -199,64 +215,15 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, colla
           )}
         </div>
       </div>
-    </aside>
-  );
-}
-
-function SidebarPinMenu({ pin, onToggle }: { pin: { id: string, name: string, href: string }, onToggle: () => void }) {
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handle(e: Event) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    if (open) {
-      document.addEventListener("pointerdown", handle);
-      return () => document.removeEventListener("pointerdown", handle);
-    }
-  }, [open]);
-
-  useEffect(() => {
-    const btn = document.getElementById(`sidebar-pin-menu-${pin.id}`);
-    const handleOpen = () => setOpen(true);
-    btn?.addEventListener("open-menu", handleOpen);
-    return () => btn?.removeEventListener("open-menu", handleOpen);
-  }, [pin.id]);
-
-  return (
-    <div className="relative shrink-0 pr-2 lg:opacity-0 lg:group-hover:opacity-100 opacity-100 transition-opacity" ref={menuRef}>
-      <button
-        id={`sidebar-pin-menu-${pin.id}`}
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        className="p-1 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-all"
-      >
-        <MoreVertical size={16} />
-      </button>
-
-      {open && (
-        <div className="absolute right-0 top-full mt-1 w-40 bg-[hsl(var(--card))] border rounded-xl shadow-lg py-1 animate-in-slide-up z-50">
-          <button
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onToggle();
-              setOpen(false);
-            }}
-            className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-sm text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-colors"
-          >
-            <PinOff size={14} />
-            Unpin
-          </button>
-        </div>
+      
+      {contextMenu.isOpen && contextMenu.node && contextMenu.position && (
+        <ContextMenu 
+          node={contextMenu.node} 
+          position={contextMenu.position} 
+          onClose={contextMenu.close} 
+        />
       )}
-    </div>
+    </aside>
   );
 }
 
