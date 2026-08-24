@@ -7,8 +7,9 @@ import { FileGridSkeleton, FileListSkeleton } from "@/components/files/FileSkele
 import { MediaViewer, type MediaSibling } from "@/components/viewer/MediaViewer";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
 import { useTopBar } from "@/components/layout/TopBarContext";
-
 import { sortNodes } from "@/lib/utils";
+
+type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
 
 export default function PhotosPage() {
   const [nodes, setNodes] = useState<FileNodeWithThumbnail[]>([]);
