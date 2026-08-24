@@ -154,3 +154,9 @@ All three pages now behave identically to `files/[...path]/page.tsx`:
 107. **Infinite Loop Resolved** — hls.js was receiving these truncated segments, hitting a `MEDIA_ERROR` while parsing incomplete fmp4 boxes, dropping the buffer, and retrying. Because the browser heavily cached the truncated 32KB response, it repeatedly served it from disk cache, causing an endless `segment_000 -> segment_001 -> MEDIA_ERROR -> segment_000` loop without ever hitting the server again. With native `temp_file`, FFmpeg atomically renames the segment only when it is 100% complete, preventing premature cache hits.
 
 **To resolve caching issues in development**: Users experiencing the infinite loop need to clear their browser cache or perform a hard refresh, as their browser has aggressively cached the corrupt, truncated segments from prior sessions.
+
+## Session 13 — MediaViewer Timeline Mismatch Bug Fix
+108. **Sorting logic lifted to Page components** — Lifted `sortNodes` utility into `web/lib/utils.ts`. 
+109. **FileGrid and FileList stripped of internal sorting** — Removed internal alphabetical sort from `FileGrid.tsx` and `FileList.tsx`.
+110. **Consistent Sorting State for MediaViewer** — `files`, `photos`, `videos`, `documents`, and `favorites` pages now sort items *before* sending to the Grid/List and passing them into the `siblings` array for `MediaViewer`. This ensures the timeline matches the visual Grid exactly.
+111. **Recent Page Chronological Sorting fix** — Fixed a bug where `recent/page.tsx` was unintentionally alphabetically sorted; it now strictly maintains backend descending chronological order.
