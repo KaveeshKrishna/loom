@@ -8,12 +8,12 @@ import { MediaViewer, type MediaSibling } from "@/components/viewer/MediaViewer"
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
 import { useTopBar } from "@/components/layout/TopBarContext";
 import { sortNodes } from "@/lib/utils";
+import { useInfiniteNodes } from "@/hooks/useInfiniteNodes";
+import { Loader2 } from "lucide-react";
 
-type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
+type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null; preview: Preview | null };
 
 export default function PhotosPage() {
-  const [nodes, setNodes] = useState<FileNodeWithThumbnail[]>([]);
-  const [loading, setLoading] = useState(true);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const { viewMode, setBreadcrumbs, searchQuery, searchGlobal } = useTopBar();
 
@@ -26,17 +26,10 @@ export default function PhotosPage() {
     setBreadcrumbs([{ label: "Photos", href: "/photos" }]);
   }, [setBreadcrumbs]);
 
+  // Fetch favorites separately (small list — no pagination needed)
   useEffect(() => {
-    setLoading(true);
-    fetch("/api/files/type?type=image")
-      .then((r) => r.json())
-      .then((data) => {
-        setNodes(data.nodes ?? []);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-
-    fetch("/api/favorites")
+    const controller = new AbortController();
+    fetch("/api/favorites?limit=500", { signal: controller.signal })
       .then((r) => r.json())
       .then((data) => {
         const ids = (data.favorites ?? []).map(
@@ -44,8 +37,12 @@ export default function PhotosPage() {
         );
         setFavoriteIds(new Set(ids));
       })
-      .catch(() => {});
+      .catch((err) => { if (err.name !== "AbortError") console.error(err); });
+    return () => controller.abort();
   }, []);
+
+  const { nodes, loading, loadingMore, hasMore, sentinelRef } =
+    useInfiniteNodes<FileNodeWithThumbnail>("/api/files/type?type=image");
 
   const sortedNodes = useMemo(() => sortNodes(nodes), [nodes]);
 
@@ -109,6 +106,16 @@ export default function PhotosPage() {
           showPath
         />
       )}
+
+      {/* Infinite scroll sentinel + loading indicator */}
+      {hasMore && (
+        <div ref={sentinelRef} className="flex justify-center py-6">
+          {loadingMore && (
+            <Loader2 size={20} className="animate-spin text-[hsl(var(--muted-foreground))]" />
+          )}
+        </div>
+      )}
+
       {viewer && (
         <MediaViewer
           relativePath={viewer.node.relativePath}

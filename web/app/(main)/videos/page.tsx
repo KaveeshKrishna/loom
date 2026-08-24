@@ -8,12 +8,12 @@ import { MediaViewer, type MediaSibling } from "@/components/viewer/MediaViewer"
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
 import { useTopBar } from "@/components/layout/TopBarContext";
 import { sortNodes } from "@/lib/utils";
+import { useInfiniteNodes } from "@/hooks/useInfiniteNodes";
+import { Loader2 } from "lucide-react";
 
-type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
+type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null; preview: Preview | null };
 
 export default function VideosPage() {
-  const [nodes, setNodes] = useState<FileNodeWithThumbnail[]>([]);
-  const [loading, setLoading] = useState(true);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const { viewMode, setBreadcrumbs, searchQuery, searchGlobal } = useTopBar();
 
@@ -27,16 +27,8 @@ export default function VideosPage() {
   }, [setBreadcrumbs]);
 
   useEffect(() => {
-    setLoading(true);
-    fetch("/api/files/type?type=video")
-      .then((r) => r.json())
-      .then((data) => {
-        setNodes(data.nodes ?? []);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-
-    fetch("/api/favorites")
+    const controller = new AbortController();
+    fetch("/api/favorites?limit=500", { signal: controller.signal })
       .then((r) => r.json())
       .then((data) => {
         const ids = (data.favorites ?? []).map(
@@ -44,8 +36,12 @@ export default function VideosPage() {
         );
         setFavoriteIds(new Set(ids));
       })
-      .catch(() => {});
+      .catch((err) => { if (err.name !== "AbortError") console.error(err); });
+    return () => controller.abort();
   }, []);
+
+  const { nodes, loading, loadingMore, hasMore, sentinelRef } =
+    useInfiniteNodes<FileNodeWithThumbnail>("/api/files/type?type=video");
 
   const sortedNodes = useMemo(() => sortNodes(nodes), [nodes]);
 
@@ -110,6 +106,15 @@ export default function VideosPage() {
           showPath
         />
       )}
+
+      {hasMore && (
+        <div ref={sentinelRef} className="flex justify-center py-6">
+          {loadingMore && (
+            <Loader2 size={20} className="animate-spin text-[hsl(var(--muted-foreground))]" />
+          )}
+        </div>
+      )}
+
       {viewer && (
         <MediaViewer
           relativePath={viewer.node.relativePath}
