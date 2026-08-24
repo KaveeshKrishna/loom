@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { FileGrid } from "@/components/files/FileGrid";
 import { FileList } from "@/components/files/FileList";
 import { MediaViewer, type MediaSibling } from "@/components/viewer/MediaViewer";
 import { Loader2, Star } from "lucide-react";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
 import { useTopBar } from "@/components/layout/TopBarContext";
+import { sortNodes } from "@/lib/utils";
 
 type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
 
@@ -43,6 +44,8 @@ export default function FavoritesPage() {
     load();
   };
 
+  const sortedNodes = useMemo(() => sortNodes(nodes), [nodes]);
+
   return (
     <div>
       <div className="px-6 py-5 border-b">
@@ -57,18 +60,18 @@ export default function FavoritesPage() {
           <Loader2 size={24} className="animate-spin text-[hsl(var(--muted-foreground))]" />
         </div>
       ) : viewMode === "grid" ? (
-        <FileGrid nodes={nodes} onNavigate={(n) => {
+        <FileGrid nodes={sortedNodes} onNavigate={(n) => {
           if (n.type !== "FILE") return;
-          const siblings: MediaSibling[] = nodes.filter(m => m.type === "FILE").map((fn) => ({
+          const siblings: MediaSibling[] = sortedNodes.filter(m => m.type === "FILE").map((fn) => ({
             id: fn.id, name: fn.name, relativePath: fn.relativePath,
             mimeType: fn.mimeType, cachePath: fn.preview?.cachePath || fn.thumbnail?.cachePath,
           }));
           setViewer({ node: n, siblings });
         }} onFavorite={toggleFavorite} favoriteIds={favoriteIds} />
       ) : (
-        <FileList nodes={nodes} onNavigate={(n) => {
+        <FileList nodes={sortedNodes} onNavigate={(n) => {
           if (n.type !== "FILE") return;
-          const siblings: MediaSibling[] = nodes.filter(m => m.type === "FILE").map((fn) => ({
+          const siblings: MediaSibling[] = sortedNodes.filter(m => m.type === "FILE").map((fn) => ({
             id: fn.id, name: fn.name, relativePath: fn.relativePath,
             mimeType: fn.mimeType, cachePath: fn.preview?.cachePath || fn.thumbnail?.cachePath,
           }));

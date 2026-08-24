@@ -1,23 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import { FileGrid } from "@/components/files/FileGrid";
 import { FileList } from "@/components/files/FileList";
+import { FileGridSkeleton, FileListSkeleton } from "@/components/files/FileSkeletons";
 import { MediaViewer, type MediaSibling } from "@/components/viewer/MediaViewer";
-import { Loader2, Image as ImageIcon } from "lucide-react";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
 import { useTopBar } from "@/components/layout/TopBarContext";
 
-type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
+import { sortNodes } from "@/lib/utils";
 
 export default function PhotosPage() {
   const [nodes, setNodes] = useState<FileNodeWithThumbnail[]>([]);
   const [loading, setLoading] = useState(true);
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const { viewMode, setBreadcrumbs, searchQuery, searchGlobal } = useTopBar();
-  
-  useEffect(() => {
-    setBreadcrumbs([{ label: "Photos", href: "/photos" }]);
-  }, [setBreadcrumbs]);
 
   const [viewer, setViewer] = useState<{
     node: FileNodeWithThumbnail;
@@ -25,6 +22,11 @@ export default function PhotosPage() {
   } | null>(null);
 
   useEffect(() => {
+    setBreadcrumbs([{ label: "Photos", href: "/photos" }]);
+  }, [setBreadcrumbs]);
+
+  useEffect(() => {
+    setLoading(true);
     fetch("/api/files/type?type=image")
       .then((r) => r.json())
       .then((data) => {
@@ -32,46 +34,78 @@ export default function PhotosPage() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
+
+    fetch("/api/favorites")
+      .then((r) => r.json())
+      .then((data) => {
+        const ids = (data.favorites ?? []).map(
+          (f: { fileNodeId: string }) => f.fileNodeId
+        );
+        setFavoriteIds(new Set(ids));
+      })
+      .catch(() => {});
   }, []);
 
-  const filteredNodes = nodes.filter(
+  const sortedNodes = useMemo(() => sortNodes(nodes), [nodes]);
+
+  const filteredNodes = sortedNodes.filter(
     (n) => searchGlobal || !searchQuery || n.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const buildSiblings = (fromNodes: FileNodeWithThumbnail[]): MediaSibling[] =>
+    fromNodes.map((fn) => ({
+      id: fn.id,
+      name: fn.name,
+      relativePath: fn.relativePath,
+      mimeType: fn.mimeType,
+      cachePath: fn.preview?.cachePath ?? fn.thumbnail?.cachePath,
+    }));
+
+  const navigate = useCallback(
+    (node: FileNodeWithThumbnail) => {
+      const siblings = buildSiblings(filteredNodes);
+      setViewer({ node, siblings });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filteredNodes]
+  );
+
+  const toggleFavorite = async (nodeId: string) => {
+    const res = await fetch("/api/favorites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileNodeId: nodeId }),
+    });
+    const data = await res.json();
+    setFavoriteIds((prev) => {
+      const next = new Set(prev);
+      if (data.favorited) next.add(nodeId);
+      else next.delete(nodeId);
+      return next;
+    });
+  };
+
+  if (loading) {
+    return viewMode === "grid" ? <FileGridSkeleton /> : <FileListSkeleton />;
+  }
+
   return (
-    <div>
-      <div className="px-6 py-5 border-b">
-        <div className="flex items-center gap-2">
-          <ImageIcon size={20} className="text-violet-500" />
-          <h1 className="text-lg font-semibold">Photos</h1>
-        </div>
-        <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">{filteredNodes.length} photos</p>
-      </div>
-      {loading ? (
-        <div className="flex items-center justify-center py-24">
-          <Loader2 size={24} className="animate-spin text-[hsl(var(--muted-foreground))]" />
-        </div>
-      ) : viewMode === "grid" ? (
+    <>
+      {viewMode === "grid" ? (
         <FileGrid
           nodes={filteredNodes}
-          onNavigate={(n) => {
-            const siblings: MediaSibling[] = filteredNodes.map((fn) => ({
-              id: fn.id, name: fn.name, relativePath: fn.relativePath,
-              mimeType: fn.mimeType, cachePath: fn.preview?.cachePath || fn.thumbnail?.cachePath,
-            }));
-            setViewer({ node: n, siblings });
-          }}
+          onNavigate={navigate}
+          onFavorite={toggleFavorite}
+          favoriteIds={favoriteIds}
+          showPath
         />
       ) : (
         <FileList
           nodes={filteredNodes}
-          onNavigate={(n) => {
-            const siblings: MediaSibling[] = filteredNodes.map((fn) => ({
-              id: fn.id, name: fn.name, relativePath: fn.relativePath,
-              mimeType: fn.mimeType, cachePath: fn.preview?.cachePath || fn.thumbnail?.cachePath,
-            }));
-            setViewer({ node: n, siblings });
-          }}
+          onNavigate={navigate}
+          onFavorite={toggleFavorite}
+          favoriteIds={favoriteIds}
+          showPath
         />
       )}
       {viewer && (
@@ -89,6 +123,6 @@ export default function PhotosPage() {
           }}
         />
       )}
-    </div>
+    </>
   );
 }

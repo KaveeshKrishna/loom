@@ -1,15 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { FileGrid } from "@/components/files/FileGrid";
 import { FileList } from "@/components/files/FileList";
+import { FileGridSkeleton, FileListSkeleton } from "@/components/files/FileSkeletons";
 import { MediaViewer, type MediaSibling } from "@/components/viewer/MediaViewer";
-import { Loader2 } from "lucide-react";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
 import { useTopBar } from "@/components/layout/TopBarContext";
 
-type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
+import { serializeNodes, sortNodes } from "@/lib/utils";
 
 export default function FilesPage() {
   const params = useParams();
@@ -27,6 +27,9 @@ export default function FilesPage() {
   const [searching, setSearching] = useState(false);
   const { viewMode, setBreadcrumbs, searchQuery, searchGlobal } = useTopBar();
   
+  const sortedNodes = useMemo(() => sortNodes(nodes), [nodes]);
+  const sortedSearchNodes = useMemo(() => searchNodes ? sortNodes(searchNodes) : null, [searchNodes]);
+
   useEffect(() => {
     const crumbs = [{ label: "Home", href: "/files" }];
     let current = "/files";
@@ -86,19 +89,21 @@ export default function FilesPage() {
       if (node.type === "DIRECTORY") {
         router.push(`/files/${node.relativePath}`);
       } else {
-      const siblings: MediaSibling[] = nodes
-        .filter((n) => n.type === "FILE")
-        .map((n) => ({
-          id: n.id,
-          name: n.name,
-          relativePath: n.relativePath,
-          mimeType: n.mimeType,
-          cachePath: n.preview?.cachePath || n.thumbnail?.cachePath,
-        }));
-      setViewer({ node, siblings });
+        // Use displayNodes (active list) as siblings so search results also work as a timeline
+        const displayNodes = sortedSearchNodes ?? sortedNodes;
+        const siblings: MediaSibling[] = displayNodes
+          .filter((n) => n.type === "FILE")
+          .map((n) => ({
+            id: n.id,
+            name: n.name,
+            relativePath: n.relativePath,
+            mimeType: n.mimeType,
+            cachePath: n.preview?.cachePath ?? n.thumbnail?.cachePath,
+          }));
+        setViewer({ node, siblings });
       }
     },
-    [nodes, router]
+    [sortedNodes, sortedSearchNodes, router]
   );
 
   const toggleFavorite = async (nodeId: string) => {
@@ -116,18 +121,13 @@ export default function FilesPage() {
     });
   };
 
-
-
+  // Show skeleton while loading
   if (loading || (searching && !searchNodes)) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 size={24} className="animate-spin text-[hsl(var(--muted-foreground))]" />
-      </div>
-    );
+    return viewMode === "grid" ? <FileGridSkeleton /> : <FileListSkeleton />;
   }
 
-  const displayNodes = searchNodes ?? nodes;
-  const filteredNodes = searchGlobal ? nodes : displayNodes;
+  const displayNodes = sortedSearchNodes ?? sortedNodes;
+  const filteredNodes = searchGlobal ? sortedNodes : displayNodes;
   const isSearchActive = !searchGlobal && !!searchQuery;
 
   return (
@@ -160,7 +160,8 @@ export default function FilesPage() {
           siblings={viewer.siblings}
           currentId={viewer.node.id}
           onNavigateTo={(s) => {
-            const fullNode = nodes.find((n) => n.id === s.id);
+            const fullNode = nodes.find((n) => n.id === s.id)
+              ?? searchNodes?.find((n) => n.id === s.id);
             if (fullNode) setViewer((v) => v ? { ...v, node: fullNode } : null);
           }}
         />

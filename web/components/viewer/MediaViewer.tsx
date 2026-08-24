@@ -302,12 +302,10 @@ export function MediaViewer({
                 <p className="text-sm">Checking video compatibility…</p>
               </div>
             ) : hlsState.compatible ? (
-              <video
-                key={`vid-native`}
+              <NativeVideoPlayer
+                key={`vid-native-${relativePath}`}
                 src={serveSrc}
                 poster={cachePath ? `/api/cache/${cachePath}` : undefined}
-                controls
-                autoPlay
                 onLoadedData={handleImageLoad}
                 onError={handleError}
                 style={{
@@ -423,6 +421,56 @@ export function MediaViewer({
   );
 }
 
+// ── Buffering overlay shared component ───────────────────────────────────────
+
+function BufferingOverlay({ visible, label = "Loading…" }: { visible: boolean; label?: string }) {
+  if (!visible) return null;
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/60 z-10 bg-black/50 pointer-events-none backdrop-blur-[1px]">
+      <div className="w-10 h-10 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
+      <p className="text-sm font-medium tracking-wide">{label}</p>
+    </div>
+  );
+}
+
+// ── Native video player with buffering overlay ────────────────────────────────
+
+function NativeVideoPlayer({
+  src,
+  poster,
+  onLoadedData,
+  onError,
+  style,
+}: {
+  src: string;
+  poster?: string;
+  onLoadedData: () => void;
+  onError: () => void;
+  style?: React.CSSProperties;
+}) {
+  const [buffering, setBuffering] = useState(false);
+
+  return (
+    <div className="relative w-full h-full flex items-center justify-center">
+      <BufferingOverlay visible={buffering} />
+      <video
+        src={src}
+        poster={poster}
+        controls
+        autoPlay
+        onLoadedData={onLoadedData}
+        onError={onError}
+        onWaiting={() => setBuffering(true)}
+        onPlaying={() => setBuffering(false)}
+        onCanPlay={() => setBuffering(false)}
+        style={style}
+      />
+    </div>
+  );
+}
+
+// ── HLS player with buffering overlay ────────────────────────────────────────
+
 function HlsPlayer({
   fileNodeId,
   poster,
@@ -439,6 +487,7 @@ function HlsPlayer({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [preparing, setPreparing] = useState(true);
+  const [buffering, setBuffering] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -502,25 +551,21 @@ function HlsPlayer({
     }
   }, [fileNodeId, onError]);
 
-  // Optionally set duration in the video element if we know it (safari may require this for UI if manifest duration is weird, but HLS normally handles it).
-  // Actually, setting duration on the video element directly isn't possible, it's read-only. We just let Hls.js handle it from the synthesized manifest!
-
   return (
-    <>
-      {preparing && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/50 z-10 bg-black/40 pointer-events-none">
-          <div className="w-8 h-8 border-2 border-white/20 border-t-white/70 rounded-full animate-spin" />
-          <p className="text-sm">Preparing video...</p>
-        </div>
-      )}
+    <div className="relative w-full h-full flex items-center justify-center">
+      <BufferingOverlay visible={preparing} label="Preparing video…" />
+      {!preparing && <BufferingOverlay visible={buffering} />}
       <video
         ref={videoRef}
         poster={poster}
         controls
         onLoadedData={onLoadedData}
         onError={() => onError()}
+        onWaiting={() => setBuffering(true)}
+        onPlaying={() => setBuffering(false)}
+        onCanPlay={() => setBuffering(false)}
         style={style}
       />
-    </>
+    </div>
   );
 }

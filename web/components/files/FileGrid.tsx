@@ -50,15 +50,9 @@ export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
     );
   }
 
-  // Sort: directories first, then files alphabetically
-  const sorted = [...nodes].sort((a, b) => {
-    if (a.type === b.type) return a.name.localeCompare(b.name);
-    return a.type === "DIRECTORY" ? -1 : 1;
-  });
-
   return (
     <div className={cn("grid gap-3 p-4", gridClasses[gridSize])}>
-      {sorted.map((node) => (
+      {nodes.map((node) => (
         <button
           key={node.id}
           id={`file-${node.id}`}

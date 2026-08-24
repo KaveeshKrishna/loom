@@ -39,11 +39,6 @@ export function FileList({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
     );
   }
 
-  const sorted = [...nodes].sort((a, b) => {
-    if (a.type === b.type) return a.name.localeCompare(b.name);
-    return a.type === "DIRECTORY" ? -1 : 1;
-  });
-
   return (
     <div className="divide-y divide-[hsl(var(--border))]">
       {/* Header */}
@@ -53,7 +48,7 @@ export function FileList({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
         <span className="col-span-2 hidden sm:block">Size</span>
         <span className="col-span-2"></span>
       </div>
-      {sorted.map((node) => (
+      {nodes.map((node) => (
         <div
           key={node.id}
           className="group grid grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-[hsl(var(--accent)/0.5)] active:bg-[hsl(var(--accent))] active:scale-[0.99] transition-all cursor-pointer"
