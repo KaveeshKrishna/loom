@@ -4,6 +4,7 @@
 import React, { useEffect, useCallback, useState, useRef, useLayoutEffect } from "react";
 import { X, Download, RotateCw, ChevronLeft, ChevronRight, WifiOff, FileVideo2, Image as ImageIcon } from "lucide-react";
 import { getFileCategory } from "@/lib/utils";
+import Hls, { type ErrorData } from "hls.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -44,13 +45,14 @@ export function MediaViewer({
   const [state, setState] = useState<ViewerState>("loading");
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
-  // null = not yet probed, false = fine, true = needs transcode
-  const [needsTranscode, setNeedsTranscode] = useState<boolean | null>(null);
+  const [hlsState, setHlsState] = useState<{
+    probed: boolean;
+    compatible: boolean;
+    durationSeconds: number | null;
+  }>({ probed: false, compatible: true, durationSeconds: null });
 
   const category = getFileCategory(mimeType, name);
-  const isUnsupportedVideo = false; // we now use ffmpeg to transcode any unsupported codecs (like .mpg)
   const serveSrc = `/api/files/serve?path=${encodeURIComponent(relativePath)}`;
-  const transcodeSrc = `/api/files/transcode?path=${encodeURIComponent(relativePath)}`;
   const src = (category === "image" || category === "video") && cachePath
     ? `/api/cache/${cachePath}`
     : serveSrc;
@@ -60,30 +62,28 @@ export function MediaViewer({
     setState("loading");
     setZoom(1);
     setRotation(0);
-    setNeedsTranscode(null);
+    setHlsState({ probed: false, compatible: true, durationSeconds: null });
   }, [relativePath]);
 
-  // Probe video codec — transcode anything browsers can't natively play
+  // Probe video codec
   useEffect(() => {
-    if (category !== "video" || isUnsupportedVideo) return;
+    if (category !== "video" || !currentId) return;
 
-    // Codecs that all modern browsers can play natively in <video>
-    const BROWSER_NATIVE_CODECS = ["h264", "avc1", "vp8", "vp9", "av1", "theora"];
-
-    // Probe the actual codec via ffprobe HEAD request
-    fetch(`/api/files/transcode?path=${encodeURIComponent(relativePath)}`, { method: "HEAD" })
-      .then((res) => {
-        const codec = (res.headers.get("X-Video-Codec") ?? "").toLowerCase();
-        if (!codec || codec === "unknown") {
-          // Can't determine — try playing directly, fall back only on error
-          setNeedsTranscode(false);
-          return;
+    fetch(`/api/files/hls/${currentId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.error) {
+          setHlsState({ probed: true, compatible: true, durationSeconds: null });
+        } else {
+          setHlsState({
+            probed: true,
+            compatible: data.compatible,
+            durationSeconds: data.durationSeconds,
+          });
         }
-        const isNative = BROWSER_NATIVE_CODECS.some((c) => codec.includes(c));
-        setNeedsTranscode(!isNative);
       })
-      .catch(() => setNeedsTranscode(false));
-  }, [relativePath, category, isUnsupportedVideo]);
+      .catch(() => setHlsState({ probed: true, compatible: true, durationSeconds: null }));
+  }, [currentId, category]);
 
   // ── Navigation helpers ────────────────────────────────────────────────────
   const siblingIndex = siblings && currentId
@@ -292,19 +292,19 @@ export function MediaViewer({
           </div>
         )}
 
-        {/* Supported video */}
-        {category === "video" && !isUnsupportedVideo && (
-          <div key={`vid-${relativePath}`} className="w-full h-full flex items-center justify-center overflow-hidden">
-            {needsTranscode === null ? (
-              // Still probing codec — show a brief spinner
+        {/* Video */}
+        {category === "video" && (
+          <div key={`vid-${relativePath}`} className="w-full h-full flex items-center justify-center overflow-hidden relative">
+            {!hlsState.probed ? (
+              // Still probing codec
               <div className="flex flex-col items-center gap-3 text-white/50">
                 <div className="w-8 h-8 border-2 border-white/20 border-t-white/70 rounded-full animate-spin" />
                 <p className="text-sm">Checking video compatibility…</p>
               </div>
-            ) : (
+            ) : hlsState.compatible ? (
               <video
-                key={`vid-src-${needsTranscode}`}
-                src={needsTranscode ? transcodeSrc : serveSrc}
+                key={`vid-native`}
+                src={serveSrc}
                 poster={cachePath ? `/api/cache/${cachePath}` : undefined}
                 controls
                 autoPlay
@@ -318,24 +318,23 @@ export function MediaViewer({
                   maxHeight: "100%",
                 }}
               />
+            ) : (
+              <HlsPlayer
+                key={`vid-hls`}
+                fileNodeId={currentId!}
+                poster={cachePath ? `/api/cache/${cachePath}` : undefined}
+                durationSeconds={hlsState.durationSeconds}
+                onLoadedData={handleImageLoad}
+                onError={handleError}
+                style={{
+                  transform: mediaTransform,
+                  transformOrigin: "center",
+                  transition: "transform 0.2s ease",
+                  maxWidth: "100%",
+                  maxHeight: "100%",
+                }}
+              />
             )}
-          </div>
-        )}
-
-        {/* Unsupported video fallback */}
-        {category === "video" && isUnsupportedVideo && (
-          <div key={`vid-unsupported-${relativePath}`} className="flex flex-col items-center gap-4 text-white/60 px-6 text-center">
-            {cachePath
-              ? <img src={`/api/cache/${cachePath}`} alt={name} className="max-w-[300px] max-h-[300px] rounded-lg opacity-70 object-contain" />
-              : <FileVideo2 size={80} strokeWidth={1} className="opacity-30" />
-            }
-            <p className="text-white/80 text-sm">This video format isn&apos;t supported in the browser.</p>
-            <a
-              href={`/api/files/serve?path=${encodeURIComponent(relativePath)}&download=1`}
-              className="px-4 py-2 rounded-lg bg-[hsl(var(--primary))] text-white text-sm font-medium hover:opacity-90 transition-opacity"
-            >
-              Download to watch
-            </a>
           </div>
         )}
 
@@ -424,5 +423,104 @@ export function MediaViewer({
   );
 }
 
+function HlsPlayer({
+  fileNodeId,
+  poster,
+  onLoadedData,
+  onError,
+  style,
+}: {
+  fileNodeId: string;
+  poster?: string;
+  durationSeconds?: number | null;
+  onLoadedData: () => void;
+  onError: () => void;
+  style?: React.CSSProperties;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [preparing, setPreparing] = useState(true);
 
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
 
+    if (Hls.isSupported()) {
+      let mediaErrorCount = 0;
+
+      const hls = new Hls({
+        // Tweak timeouts to match bounded wait on the server side
+        manifestLoadingMaxRetry: 10,
+        manifestLoadingRetryDelay: 2000,
+        levelLoadingMaxRetry: 10,
+        levelLoadingRetryDelay: 2000,
+        fragLoadingMaxRetry: 10,
+        fragLoadingRetryDelay: 2000,
+      });
+
+      hls.loadSource(`/api/files/hls/${fileNodeId}/manifest.m3u8`);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setPreparing(false);
+        video.play().catch(() => {});
+      });
+
+      hls.on(Hls.Events.ERROR, (_event: unknown, data: ErrorData) => {
+        if (data.fatal) {
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              mediaErrorCount++;
+              if (mediaErrorCount <= 3) {
+                hls.recoverMediaError();
+              } else {
+                // Too many media errors — give up and show fallback
+                hls.destroy();
+                onError();
+              }
+              break;
+            default:
+              hls.destroy();
+              onError();
+              break;
+          }
+        }
+      });
+
+      return () => {
+        hls.destroy();
+      };
+    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      // Safari native HLS
+      video.src = `/api/files/hls/${fileNodeId}/manifest.m3u8`;
+      video.addEventListener("loadedmetadata", () => {
+        setPreparing(false);
+        video.play().catch(() => {});
+      });
+    }
+  }, [fileNodeId, onError]);
+
+  // Optionally set duration in the video element if we know it (safari may require this for UI if manifest duration is weird, but HLS normally handles it).
+  // Actually, setting duration on the video element directly isn't possible, it's read-only. We just let Hls.js handle it from the synthesized manifest!
+
+  return (
+    <>
+      {preparing && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/50 z-10 bg-black/40 pointer-events-none">
+          <div className="w-8 h-8 border-2 border-white/20 border-t-white/70 rounded-full animate-spin" />
+          <p className="text-sm">Preparing video...</p>
+        </div>
+      )}
+      <video
+        ref={videoRef}
+        poster={poster}
+        controls
+        onLoadedData={onLoadedData}
+        onError={() => onError()}
+        style={style}
+      />
+    </>
+  );
+}

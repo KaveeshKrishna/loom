@@ -19,23 +19,33 @@ Loom is a production-quality, self-hosted personal storage application for the `
 | Path | Purpose |
 |---|---|
 | `/srv/storage/personal/media` | Samsung T7 (original files — source of truth) |
-| `/srv/data/gallery-cache` | NVMe cache (thumbnails, previews, temp) |
+| `/srv/data/gallery-cache` | NVMe cache (thumbnails, previews, video HLS segments) |
 | PostgreSQL | Metadata only (never original files) |
 
 **Scanner & Cache Architecture:**
 - **Idle by Default:** The scanner intentionally does NOT use a real-time filesystem watcher (like `chokidar`) and does NOT scan automatically on startup. This guarantees the Samsung T7 SSD remains completely idle and is allowed to sleep (via USB runtime power management) when not in use.
-- **Manual Reconciliation Scans:** Scans are triggered explicitly by the Owner (via Settings → Scanner → Rescan Library) or via atomic upload jobs. Scans skip unchanged files (by size and mtime) and generate missing thumbnails/previews.
-- **Dual Cache Layer:** 
+- **Universal Derived Media Reconciliation:** Scans are triggered explicitly by the Owner (via Settings → Scanner → Scan Now). Loom uses a `sourceVersion` (format: `size-mtimeMs`) to uniquely identify files. Rescans seamlessly skip unchanged files, purge stale/orphaned caches, and generate missing media.
+- **Triple Cache Layer:** 
   - `thumbnails/` (320px) for ultra-fast FileGrid loading.
   - `previews/` (1920px) for high-resolution full-screen MediaViewer.
-- **Job Management:** Scans are tracked in the database, viewable in the UI, and can be stopped or deleted. Logs are auto-cleaned to a maximum of 10.
+  - `videos/` (fMP4 segments) for region-based HLS streaming (capped at 20 GB).
+
+---
+
+## Major Features
+
+- **Region-Based HLS Video Streaming:** Loom intelligently probes video files using `ffprobe`. Natively supported videos (like standard MP4s) are served directly. Incompatible videos (HEVC, MOV, MKV, AVI) are converted to HLS on the fly via FFmpeg. Loom only transcodes the exact requested region of the timeline, deduplicates concurrent requests, and tears down idle FFmpeg processes after 30 seconds to preserve VPS resources.
+- **Responsive Premium UI:** Built with Vanilla CSS and Lucide icons. Features adaptive grid layouts, mobile-first design, fluid breadcrumb navigation, and a global search system.
+- **Advanced Touch Interactions:** Support for native-feeling mobile interactions, including long-press context menus on touch devices and right-click menus on desktop, without triggering OS default behaviors.
+- **Authentication & Security:** Built with `better-auth`. Supports Role-Based Access Control (Owner vs Family) and path-based Access Control Lists (ACL) to restrict visibility of specific private directories. All sensitive actions are recorded in an Audit Log.
+- **TopBar State Management:** Pinned folders, view toggles (Grid/List), and search states are managed globally via `TopBarContext` and persisted across sessions using `localStorage`.
 
 ---
 
 ## First-Time Setup
 
 ### 1. Setup Samsung T7 Mount
-Loom requires the Samsung T7 SSD to be permanently mounted at `/media`. USB runtime power management (sleep/wake) is handled entirely by the Linux OS. Loom does not mount, unmount, or suspend the drive.
+Loom requires the Samsung T7 SSD to be permanently mounted at `/srv/storage/personal/media` and the NVMe cache at `/srv/data/gallery-cache`. USB runtime power management (sleep/wake) is handled entirely by the Linux OS.
 
 ### 2. Create your `.env` file
 
@@ -58,10 +68,12 @@ docker compose build
 docker compose up -d
 ```
 
-### 4. Run database migrations and seed
+### 4. Push Database Schema & Seed
+
+*(Note: Loom uses `db push` instead of migrations to apply schema changes directly.)*
 
 ```bash
-docker compose exec loom-web npx prisma migrate deploy
+docker compose exec loom-web npx prisma db push --accept-data-loss
 docker compose exec loom-web npm run db:seed
 ```
 
@@ -124,7 +136,7 @@ docker compose down
 
 - Loom containers are **not** privileged.
 - The Samsung T7 is permanently mounted by the host OS. Loom has no privileges to mount or unmount it.
-- The Samsung T7 is **never modified** by the application. Thumbnails and previews go to `/cache` only.
+- The Samsung T7 is **never modified** by the application. Thumbnails, previews, and video caches go to `/cache` only.
 - All paths exposed to users are relative (e.g. `Pics/Vacation`) — host paths are never leaked.
 
 ---

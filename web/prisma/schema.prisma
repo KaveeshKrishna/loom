@@ -105,21 +105,26 @@ model AclRule {
 // ─────────────────────────────────────────────
 
 model FileNode {
-  id           String    @id @default(cuid())
-  relativePath String    @unique  // e.g. "Pics/Vacation/IMG_0001.jpg"
-  name         String
-  type         NodeType
-  mimeType     String?
-  size         BigInt?
-  modifiedAt   DateTime?
-  sha256       String?
-  indexedAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  isVisible    Boolean   @default(true)  // false for OS metadata dirs
+  id                String      @id @default(cuid())
+  relativePath      String      @unique  // e.g. "Pics/Vacation/IMG_0001.jpg"
+  name              String
+  type              NodeType
+  mimeType          String?
+  size              BigInt?
+  modifiedAt        DateTime?
+  sha256            String?
+  indexedAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  isVisible         Boolean     @default(true)  // false for OS metadata dirs
+  // Derived media identity — "${size}-${mtimeMs}"; null until first scan
+  sourceVersion     String?
+  // null = unknown (not yet probed), true = native browser playback, false = needs HLS
+  browserCompatible Boolean?
 
   thumbnail    Thumbnail?
   preview      Preview?
   favorites    Favorite[]
+  videoCaches  VideoCache[]  // 1-to-many: allows safe GC of old sourceVersion caches
 
   @@index([relativePath])
   @@index([type])
@@ -136,29 +141,55 @@ enum NodeType {
 // ─────────────────────────────────────────────
 
 model Thumbnail {
-  id           String   @id @default(cuid())
-  fileNodeId   String   @unique
-  cachePath    String   // Relative to /cache, e.g. "thumbnails/abc123.webp"
-  width        Int
-  height       Int
-  generatedAt  DateTime @default(now())
+  id            String   @id @default(cuid())
+  fileNodeId    String   @unique
+  cachePath     String   // Relative to /cache, e.g. "thumbnails/{fileNodeId}_{sourceVersion}.webp"
+  width         Int
+  height        Int
+  generatedAt   DateTime @default(now())
+  // sourceVersion this thumbnail was generated from; "legacy" for pre-migration records
+  sourceVersion String   @default("legacy")
 
-  fileNode     FileNode @relation(fields: [fileNodeId], references: [id], onDelete: Cascade)
+  fileNode      FileNode @relation(fields: [fileNodeId], references: [id], onDelete: Cascade)
 
   @@map("thumbnails")
 }
 
 model Preview {
-  id           String   @id @default(cuid())
-  fileNodeId   String   @unique
-  cachePath    String   // Relative to /cache, e.g. "previews/abc123.webp"
-  width        Int?
-  height       Int?
-  generatedAt  DateTime @default(now())
+  id            String   @id @default(cuid())
+  fileNodeId    String   @unique
+  cachePath     String   // Relative to /cache, e.g. "previews/{fileNodeId}_{sourceVersion}.webp"
+  width         Int?
+  height         Int?
+  generatedAt   DateTime @default(now())
+  // sourceVersion this preview was generated from; "legacy" for pre-migration records
+  sourceVersion String   @default("legacy")
 
-  fileNode     FileNode @relation(fields: [fileNodeId], references: [id], onDelete: Cascade)
+  fileNode      FileNode @relation(fields: [fileNodeId], references: [id], onDelete: Cascade)
 
   @@map("previews")
+}
+
+// ─────────────────────────────────────────────
+// VIDEO HLS CACHE (stored in /cache/videos/)
+// ─────────────────────────────────────────────
+
+model VideoCache {
+  id              String          @id @default(cuid())
+  fileNodeId      String
+  // sourceVersion at generation time — must match FileNode.sourceVersion to be valid
+  sourceVersion   String
+  // relative to /cache, e.g. "videos/{fileNodeId}/{sourceVersion}"
+  cacheDir        String
+  sizeBytes       BigInt          @default(0)
+  durationSeconds Float?          // from ffprobe, stored once, reused
+  lastAccessedAt  DateTime        @default(now())
+
+  fileNode        FileNode        @relation(fields: [fileNodeId], references: [id], onDelete: Cascade)
+
+  // Composite unique: allows old + new sourceVersion records to coexist during GC
+  @@unique([fileNodeId, sourceVersion])
+  @@map("video_cache")
 }
 
 // ─────────────────────────────────────────────

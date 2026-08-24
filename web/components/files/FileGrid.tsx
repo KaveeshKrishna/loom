@@ -98,11 +98,12 @@ export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
           className="group relative flex flex-col gap-2 p-3 rounded-xl border bg-[hsl(var(--card))] hover:border-[hsl(var(--primary)/0.3)] hover:shadow-md active:scale-[0.98] active:bg-[hsl(var(--accent)/0.5)] transition-all duration-150 text-left animate-in-fade"
         >
           {/* Thumbnail or icon */}
+          {/* Videos store their poster in the `previews` table; images use `thumbnails` */}
           <div className="aspect-square rounded-lg bg-[hsl(var(--accent))] flex items-center justify-center overflow-hidden">
-            {node.thumbnail ? (
+            {(node.thumbnail || node.preview) ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={`/api/cache/${node.thumbnail.cachePath}`}
+                src={`/api/cache/${node.preview?.cachePath ?? node.thumbnail!.cachePath}`}
                 alt={node.name}
                 className="w-full h-full object-cover"
                 loading="lazy"
