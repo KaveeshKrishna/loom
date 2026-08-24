@@ -51,16 +51,17 @@ export default function FilesPage() {
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
-    fetch(`/api/files?path=${encodeURIComponent(currentPath)}`)
+    fetch(`/api/files?path=${encodeURIComponent(currentPath)}`, { signal: controller.signal })
       .then((r) => r.json())
       .then((data) => {
         setNodes(data.children ?? []);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch((err) => { if (err.name !== "AbortError") setLoading(false); });
 
-    fetch("/api/favorites")
+    fetch("/api/favorites", { signal: controller.signal })
       .then((r) => r.json())
       .then((data) => {
         const ids = (data.favorites ?? []).map(
@@ -69,21 +70,25 @@ export default function FilesPage() {
         setFavoriteIds(new Set(ids));
       })
       .catch(() => {});
+      
+    return () => controller.abort();
   }, [currentPath]);
 
   useEffect(() => {
+    const controller = new AbortController();
     if (searchQuery && !searchGlobal) {
       setSearching(true);
-      fetch(`/api/search?q=${encodeURIComponent(searchQuery)}&folder=${encodeURIComponent(currentPath)}`)
+      fetch(`/api/search?q=${encodeURIComponent(searchQuery)}&folder=${encodeURIComponent(currentPath)}`, { signal: controller.signal })
         .then((r) => r.json())
         .then((data) => {
           setSearchNodes(data.results ?? []);
           setSearching(false);
         })
-        .catch(() => setSearching(false));
+        .catch((err) => { if (err.name !== "AbortError") setSearching(false); });
     } else {
       setSearchNodes(null);
     }
+    return () => controller.abort();
   }, [searchQuery, searchGlobal, currentPath]);
 
   const navigate = useCallback(

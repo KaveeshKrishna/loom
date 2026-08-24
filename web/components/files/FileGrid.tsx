@@ -101,6 +101,7 @@ export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
                 alt={node.name}
                 className="w-full h-full object-cover"
                 loading="lazy"
+                decoding="async"
               />
             ) : (
               <FileIcon mimeType={node.mimeType} type={node.type} />

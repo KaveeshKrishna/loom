@@ -14,10 +14,12 @@ export default function RecentPage() {
   const [viewer, setViewer] = useState<{ node: FileNodeWithThumbnail; siblings: MediaSibling[] } | null>(null);
 
   useEffect(() => {
-    fetch("/api/files/recent")
+    const controller = new AbortController();
+    fetch("/api/files/recent", { signal: controller.signal })
       .then((r) => r.json())
       .then((data) => { setNodes(data.nodes ?? []); setLoading(false); })
-      .catch(() => setLoading(false));
+      .catch((err) => { if (err.name !== "AbortError") setLoading(false); });
+    return () => controller.abort();
   }, []);
 
   // Recent page should not be sorted alphabetically, we use the raw nodes which are ordered by updatedAt desc
