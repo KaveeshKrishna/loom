@@ -30,7 +30,7 @@ All three pages now behave identically to `files/[...path]/page.tsx`:
 - Both players share a `BufferingOverlay` component — semi-transparent black with `backdrop-blur` + spinner + label text.
 
 ### Build Status
-- ✅ `docker compose build loom-web` — exit code 0 (Session 12, 2026-08-24)
+- ✅ `docker compose build loom-web` — exit code 0 (Session 13, 2026-08-25)
 - ✅ `docker compose up -d loom-web` — healthy
 
 
