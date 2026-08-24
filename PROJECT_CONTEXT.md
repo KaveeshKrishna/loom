@@ -1,7 +1,39 @@
 # Loom Project Context
 
 ## Last Updated
-2026-08-24 (Session 11)
+2026-08-24 (Session 12)
+
+## Session 12 — Page Unification, Loading Skeletons & Video Buffering Fix
+
+### Loading Skeletons
+- **New file:** `web/components/files/FileSkeletons.tsx` — exports `FileGridSkeleton` and `FileListSkeleton`.
+- Skeleton cards/rows use a `shimmer` CSS keyframe animation (added to `globals.css`) that sweeps a highlight across the placeholder shapes.
+- `FileGridSkeleton` uses the exact same responsive grid column breakpoints as `FileGrid` and reads `gridSize` from `TopBarContext`.
+- `FileListSkeleton` mimics the list header + row layout with staggered shimmer delays.
+
+### Category Pages Unified (Photos, Videos, Documents)
+All three pages now behave identically to `files/[...path]/page.tsx`:
+- **Removed** the custom static header (`<div className="px-6 py-5 border-b">`) — pages now look exactly like the home file explorer.
+- **Added** `favoriteIds` state + `toggleFavorite` handler → star button now works in all views on these pages.
+- **Added** `showPath` prop → file path shown under the filename (since all files from across the library are mixed).
+- **Fixed sibling timeline:** `buildSiblings()` now correctly maps `preview?.cachePath ?? thumbnail?.cachePath` so video poster frames appear in the timeline.
+- **Fixed Documents breadcrumb bug:** `documents/page.tsx` was missing the `setBreadcrumbs` call, causing the top bar/search bar to stay on the previous page's state. Fixed by adding `setBreadcrumbs([{ label: "Documents", href: "/documents" }])` on mount.
+
+### Home File Explorer — Search Timeline Fix
+- `files/[...path]/page.tsx`: `navigate()` now builds siblings from `displayNodes` (the active search results list) instead of always using raw `nodes`. This means opening a file while searching populates the bottom timeline with the other search results.
+- `onNavigateTo` now looks up the full node in both `nodes` and `searchNodes` so navigation across search results works.
+
+### Video Buffering Overlay
+- `MediaViewer.tsx`: Extracted native `<video>` into a `NativeVideoPlayer` component with a `buffering` state.
+- `onWaiting` → shows spinner overlay; `onPlaying`/`onCanPlay` → hides it.
+- `HlsPlayer` also gains the same `onWaiting`/`onPlaying`/`onCanPlay` handlers and shows the overlay.
+- Both players share a `BufferingOverlay` component — semi-transparent black with `backdrop-blur` + spinner + label text.
+
+### Build Status
+- ✅ `docker compose build loom-web` — exit code 0 (Session 12, 2026-08-24)
+- ✅ `docker compose up -d loom-web` — healthy
+
+
 
 ## Session 10 Fix — Video Thumbnails Not Showing in FileGrid
 **Root Cause:** The scanner stores video poster frames in the **`previews` DB table** (path: `previews/video-{id}_{version}.webp`), NOT in the `thumbnails` table. `FileGrid.tsx` was only checking `node.thumbnail` (always `null` for videos), so it fell back to showing a file icon instead of the poster.

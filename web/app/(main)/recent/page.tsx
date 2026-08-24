@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { FileList } from "@/components/files/FileList";
 import { MediaViewer, type MediaSibling } from "@/components/viewer/MediaViewer";
 import { Loader2, Clock } from "lucide-react";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
+import { sortNodes } from "@/lib/utils";
 
 type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
 
@@ -20,6 +21,9 @@ export default function RecentPage() {
       .catch(() => setLoading(false));
   }, []);
 
+  // Recent page should not be sorted alphabetically, we use the raw nodes which are ordered by updatedAt desc
+  const sortedNodes = nodes;
+
   return (
     <div>
       <div className="px-6 py-5 border-b">
@@ -34,9 +38,9 @@ export default function RecentPage() {
           <Loader2 size={24} className="animate-spin text-[hsl(var(--muted-foreground))]" />
         </div>
       ) : (
-        <FileList nodes={nodes} onNavigate={(n) => {
+        <FileList nodes={sortedNodes} onNavigate={(n) => {
           if (n.type !== "FILE") return;
-          const siblings: MediaSibling[] = nodes.filter(m => m.type === "FILE").map((fn) => ({
+          const siblings: MediaSibling[] = sortedNodes.filter(m => m.type === "FILE").map((fn) => ({
             id: fn.id, name: fn.name, relativePath: fn.relativePath,
             mimeType: fn.mimeType, cachePath: fn.preview?.cachePath || fn.thumbnail?.cachePath,
           }));

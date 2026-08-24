@@ -82,3 +82,10 @@ export function serializeNode<T extends { size?: bigint | null }>(node: T): Omit
 export function serializeNodes<T extends { size?: bigint | null }>(nodes: T[]): (Omit<T, "size"> & { size: string | null })[] {
   return nodes.map(serializeNode);
 }
+
+export function sortNodes<T extends { type: string; name: string }>(nodes: T[]): T[] {
+  return [...nodes].sort((a, b) => {
+    if (a.type === b.type) return a.name.localeCompare(b.name);
+    return a.type === "DIRECTORY" ? -1 : 1;
+  });
+}
