@@ -44,6 +44,47 @@ export function ScanPanel() {
     setTimeout(() => { load(); setTriggering(false); }, 500);
   };
 
+  const [videoCacheStats, setVideoCacheStats] = useState<{ usedBytes: number, limitBytes: number, cachedVideos: number } | null>(null);
+  const [clearingCache, setClearingCache] = useState(false);
+
+  const [thumbStats, setThumbStats] = useState<{ thumbCount: number, previewCount: number, physicalFiles: number } | null>(null);
+  const [resettingThumbs, setResettingThumbs] = useState(false);
+
+  const loadThumbStats = () => {
+    fetch("/api/thumbnail-cache").then(r => r.json()).then(d => {
+      if (!d.error) setThumbStats(d);
+    }).catch(() => {});
+  };
+
+  const loadStats = () => {
+    fetch("/api/video-cache").then(r => r.json()).then(d => {
+      if (!d.error) setVideoCacheStats(d);
+    }).catch(() => {});
+  };
+
+  useEffect(() => { loadStats(); loadThumbStats(); }, []);
+
+  const resetThumbnailCache = async () => {
+    if (!confirm(
+      "This will delete ALL thumbnail and preview data (DB records + cached files) and reset the scanner so it regenerates everything from scratch on the next scan.\n\nOriginal media files will NOT be touched.\n\nContinue?"
+    )) return;
+    setResettingThumbs(true);
+    await fetch("/api/thumbnail-cache", { method: "DELETE" });
+    // Kick off a fresh rescan automatically
+    await fetch("/api/scan", { method: "POST" });
+    loadThumbStats();
+    load();
+    setResettingThumbs(false);
+  };
+
+  const clearVideoCache = async () => {
+    if (!confirm("Are you sure you want to clear the generated video cache? This will NOT delete original files on the T7.")) return;
+    setClearingCache(true);
+    await fetch("/api/video-cache", { method: "DELETE" });
+    loadStats();
+    setClearingCache(false);
+  };
+
   return (
     <div className="max-w-2xl space-y-6">
       <div>
@@ -60,6 +101,47 @@ export function ScanPanel() {
           
           <button id="scan-full" onClick={() => trigger()} disabled={triggering} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-[hsl(var(--primary))] text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-60">
             {triggering ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Scan Now
+          </button>
+        </div>
+      </div>
+
+      {/* ── Thumbnail & Preview Cache ──────────────────────────────────── */}
+      <div className="bg-[hsl(var(--card))] border rounded-xl p-4 flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium">Thumbnail &amp; Preview Cache</p>
+          <p className="text-xs text-[hsl(var(--muted-foreground))] mt-0.5">
+            {thumbStats
+              ? `${thumbStats.thumbCount} thumbnails · ${thumbStats.previewCount} previews · ${thumbStats.physicalFiles} cached files`
+              : "Loading..."}
+          </p>
+          <p className="text-[11px] text-[hsl(var(--muted-foreground))] mt-1 max-w-xs">
+            Resets all thumbnail/preview data and queues a fresh rescan to regenerate everything.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            id="reset-thumbnail-cache"
+            onClick={resetThumbnailCache}
+            disabled={resettingThumbs}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-[hsl(var(--destructive)/0.1)] text-[hsl(var(--destructive))] rounded-lg hover:bg-[hsl(var(--destructive)/0.2)] transition-colors disabled:opacity-60"
+          >
+            {resettingThumbs ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Reset Cache
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-[hsl(var(--card))] border rounded-xl p-4 flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium">HLS Video Cache (NVMe)</p>
+          <p className="text-xs text-[hsl(var(--muted-foreground))] mt-0.5">
+            {videoCacheStats ? (
+              `${(videoCacheStats.usedBytes / 1e9).toFixed(2)} GB used of ${(videoCacheStats.limitBytes / 1e9).toFixed(0)} GB (${videoCacheStats.cachedVideos} videos)`
+            ) : "Loading..."}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button id="clear-video-cache" onClick={clearVideoCache} disabled={clearingCache || !videoCacheStats} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-[hsl(var(--destructive)/0.1)] text-[hsl(var(--destructive))] rounded-lg hover:bg-[hsl(var(--destructive)/0.2)] transition-colors disabled:opacity-60">
+            {clearingCache ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Clear Cache
           </button>
         </div>
       </div>
