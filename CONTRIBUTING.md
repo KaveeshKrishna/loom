@@ -46,7 +46,14 @@ This generates a new migration under `web/prisma/migrations/`. Commit the genera
 
 ## Code conventions
 
-See [CLAUDE.md](CLAUDE.md) for the load-bearing conventions and gotchas that aren't obvious from reading any single file (BigInt serialization, path validation, trash-visibility filters, etc.) — please skim it before touching filesystem or API-route code.
+A few load-bearing patterns that aren't obvious from reading any single file — please keep these in mind before touching filesystem or API-route code:
+
+- Any API response containing a `FileNode` or `ContentIdentity` must go through `serializeNode`/`serializeNodes` (`web/lib/utils.ts`) — both have `BigInt` fields that throw on plain `JSON` serialization otherwise.
+- Every query for user-visible files needs `inTrash: false` in its `where` clause, or trashed items reappear across the app.
+- Call `resolveAndValidate()` (`web/lib/path-security.ts`) before any filesystem operation — never construct an absolute path by hand.
+- Empty string is a valid path (it means the media root) — check with `== null`, never `!destDir`.
+- Moving/renaming/trashing a directory must cascade to all descendant `FileNode`s' `relativePath`/`inTrash`, or children silently desync from disk.
+- See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design principles (idle-drive scanning, content-based deduplication, trash semantics) behind these rules.
 
 ## Pull requests
 

@@ -66,7 +66,9 @@ web/next-env.d.ts
 # tunnel IDs, etc. for whichever machine this is deployed on — never shared)
 VPS_CONTEXT.md
 
-# Agent tooling artifacts — local to a given editor/assistant setup
+# Agent tooling artifacts — local to a given editor/assistant setup, kept on
+# disk for continuity across chat sessions but never published
 .agents/
 .claude/
+CLAUDE.md
 CLAUDE.local.md
