@@ -6,7 +6,7 @@ import { MediaViewer, type MediaSibling } from "@/components/viewer/MediaViewer"
 import { Loader2, Clock } from "lucide-react";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
 
-type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
+type FileNodeWithThumbnail = FileNode & { contentIdentity: ({ thumbnail: Thumbnail | null, preview: Preview | null }) | null };
 
 export default function RecentPage() {
   const [nodes, setNodes] = useState<FileNodeWithThumbnail[]>([]);
@@ -43,7 +43,7 @@ export default function RecentPage() {
           if (n.type !== "FILE") return;
           const siblings: MediaSibling[] = sortedNodes.filter(m => m.type === "FILE").map((fn) => ({
             id: fn.id, name: fn.name, relativePath: fn.relativePath,
-            mimeType: fn.mimeType, cachePath: fn.preview?.cachePath || fn.thumbnail?.cachePath,
+            mimeType: fn.mimeType, cachePath: fn.contentIdentity?.preview?.cachePath || fn.contentIdentity?.thumbnail?.cachePath,
           }));
           setViewer({ node: n, siblings });
         }} />
@@ -51,7 +51,7 @@ export default function RecentPage() {
       {viewer && (
         <MediaViewer
           relativePath={viewer.node.relativePath}
-          cachePath={viewer.node.preview?.cachePath || viewer.node.thumbnail?.cachePath}
+          cachePath={viewer.node.contentIdentity?.preview?.cachePath || viewer.node.contentIdentity?.thumbnail?.cachePath}
           name={viewer.node.name}
           mimeType={viewer.node.mimeType}
           onClose={() => setViewer(null)}

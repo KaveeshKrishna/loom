@@ -15,8 +15,8 @@ export async function GET(req: NextRequest) {
   const cursor = searchParams.get("cursor") ?? null;
 
   const favorites = await prisma.favorite.findMany({
-    where: { userId: user.id },
-    include: { fileNode: { include: { thumbnail: true, preview: true } } },
+    where: { userId: user.id, fileNode: { inTrash: false } },
+    include: { fileNode: { include: { contentIdentity: { include: { thumbnail: true, preview: true } } } } },
     orderBy: { createdAt: "desc" },
     take: limit + 1,
     ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),

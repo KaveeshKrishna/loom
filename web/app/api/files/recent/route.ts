@@ -12,8 +12,8 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const nodes = await prisma.fileNode.findMany({
-    where: { isVisible: true, type: "FILE" },
-    include: { thumbnail: true, preview: true },
+    where: { isVisible: true, type: "FILE", inTrash: false },
+    include: { contentIdentity: { include: { thumbnail: true, preview: true } } },
     orderBy: { modifiedAt: "desc" },
     take: 100,
   });

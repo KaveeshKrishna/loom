@@ -11,7 +11,7 @@ import { sortNodes } from "@/lib/utils";
 import { useInfiniteNodes } from "@/hooks/useInfiniteNodes";
 import { Loader2 } from "lucide-react";
 
-type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null; preview: Preview | null };
+type FileNodeWithThumbnail = FileNode & { contentIdentity: ({ thumbnail: Thumbnail | null; preview: Preview | null }) | null };
 
 export default function DocumentsPage() {
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
@@ -54,7 +54,7 @@ export default function DocumentsPage() {
       name: fn.name,
       relativePath: fn.relativePath,
       mimeType: fn.mimeType,
-      cachePath: fn.preview?.cachePath ?? fn.thumbnail?.cachePath,
+      cachePath: fn.contentIdentity?.preview?.cachePath ?? fn.contentIdentity?.thumbnail?.cachePath,
     }));
 
   const navigate = useCallback(
@@ -116,7 +116,7 @@ export default function DocumentsPage() {
       {viewer && (
         <MediaViewer
           relativePath={viewer.node.relativePath}
-          cachePath={viewer.node.preview?.cachePath || viewer.node.thumbnail?.cachePath}
+          cachePath={viewer.node.contentIdentity?.preview?.cachePath || viewer.node.contentIdentity?.thumbnail?.cachePath}
           name={viewer.node.name}
           mimeType={viewer.node.mimeType}
           onClose={() => setViewer(null)}

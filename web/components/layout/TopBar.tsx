@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Search, Grid3X3, List, Menu, SunMedium, Moon, Monitor, LogOut, ChevronDown, Globe, FolderSearch, X } from "lucide-react";
+import { Search, Grid3X3, List, Menu, SunMedium, Moon, Monitor, LogOut, ChevronDown, Globe, FolderSearch, X, Bell, CheckCircle2, AlertCircle } from "lucide-react";
 import { cn, truncateName } from "@/lib/utils";
 import { signOut } from "@/lib/auth-client";
+import type { Notification } from "@prisma/client";
+
 
 interface TopBarProps {
   onMenuToggle?: () => void;
@@ -43,12 +45,55 @@ import { useTopBar } from "./TopBarContext";
 
 export function TopBar({ onMenuToggle, userName }: TopBarProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const isSettingsPage = pathname === "/settings" || pathname.startsWith("/settings/");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const { theme, applyTheme } = useTheme();
   const { viewMode, setViewMode, gridSize, setGridSize, breadcrumbs, searchQuery, setSearchQuery, searchGlobal, setSearchGlobal } = useTopBar();
   const [gridMenuOpen, setGridMenuOpen] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement>(null);
+  
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const notificationsRef = useRef<HTMLDivElement>(null);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const res = await fetch("/api/notifications");
+      if (res.ok) {
+        const data = await res.json();
+        setNotifications(data);
+      }
+    } catch (e) {
+      console.error("Failed to fetch notifications", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 30000); // poll every 30s
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
+
+  const dismissNotification = async (id?: string) => {
+    try {
+      await fetch("/api/notifications/dismiss", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(id ? { notificationId: id } : { dismissAll: true })
+      });
+      if (id) {
+        setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+      } else {
+        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      }
+    } catch (e) {
+      console.error("Failed to dismiss notifications", e);
+    }
+  };
+
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   useEffect(() => {
     function handle(e: MouseEvent) {
@@ -58,10 +103,14 @@ export function TopBar({ onMenuToggle, userName }: TopBarProps) {
       if (gridMenuRef.current && !gridMenuRef.current.contains(e.target as Node)) {
         setGridMenuOpen(false);
       }
+      if (notificationsRef.current && !notificationsRef.current.contains(e.target as Node)) {
+        setNotificationsOpen(false);
+      }
     }
     document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
   }, []);
+
 
   const handleSignOut = async () => {
     await signOut();
@@ -158,10 +207,12 @@ export function TopBar({ onMenuToggle, userName }: TopBarProps) {
           <div className="flex-1 min-w-[8px]" />
         )}
 
-        {/* Desktop Search */}
-        <div className="hidden md:flex items-center gap-2 max-w-[280px] w-full shrink">
-          {searchInputContent}
-        </div>
+        {/* Desktop Search — hidden on settings page */}
+        {!isSettingsPage && (
+          <div className="hidden md:flex items-center gap-2 max-w-[280px] w-full shrink">
+            {searchInputContent}
+          </div>
+        )}
 
       <div className="flex items-center gap-1 shrink-0 ml-auto">
         {/* View toggle */}
@@ -232,6 +283,82 @@ export function TopBar({ onMenuToggle, userName }: TopBarProps) {
           >
             <List size={15} />
           </button>
+        </div>
+
+        {/* Notifications */}
+        <div className="relative" ref={notificationsRef}>
+          <button
+            onClick={() => setNotificationsOpen((v) => !v)}
+            className={cn(
+              "p-1.5 transition-colors rounded-lg relative",
+              notificationsOpen ? "bg-[hsl(var(--accent))] text-[hsl(var(--foreground))]" : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))]"
+            )}
+            title="Notifications"
+          >
+            <Bell size={18} />
+            {unreadCount > 0 && (
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[hsl(var(--destructive))] border border-[hsl(var(--background))]" />
+            )}
+          </button>
+
+          {notificationsOpen && (
+            <div className="absolute right-0 top-full mt-1.5 w-80 bg-[hsl(var(--card))] border rounded-xl shadow-lg py-2 animate-in-slide-up z-50 overflow-hidden flex flex-col max-h-[400px]">
+              <div className="px-4 py-2 border-b flex items-center justify-between shrink-0">
+                <p className="font-medium text-sm">Notifications</p>
+                {unreadCount > 0 && (
+                  <button 
+                    onClick={() => dismissNotification()}
+                    className="text-xs text-[hsl(var(--primary))] hover:underline"
+                  >
+                    Mark all as read
+                  </button>
+                )}
+              </div>
+              <div className="overflow-y-auto overflow-x-hidden p-2 flex-1 no-scrollbar flex flex-col gap-1">
+                {notifications.length === 0 ? (
+                  <p className="text-sm text-[hsl(var(--muted-foreground))] text-center py-6">No notifications</p>
+                ) : (
+                  notifications.map(notification => (
+                    <div 
+                      key={notification.id} 
+                      className={cn(
+                        "flex gap-3 p-3 rounded-lg text-sm transition-colors relative group",
+                        !notification.read ? "bg-[hsl(var(--primary)/0.05)]" : "hover:bg-[hsl(var(--accent))]"
+                      )}
+                    >
+                      <div className="shrink-0 mt-0.5">
+                        {notification.type.includes("FAILED") || notification.type.includes("INTERRUPTED") ? (
+                          <AlertCircle size={16} className="text-[hsl(var(--destructive))]" />
+                        ) : (
+                          <CheckCircle2 size={16} className="text-[hsl(var(--primary))]" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={cn("font-medium truncate", !notification.read && "text-[hsl(var(--foreground))]")}>
+                          {notification.title}
+                        </p>
+                        <p className="text-xs text-[hsl(var(--muted-foreground))] mt-0.5 break-words">
+                          {notification.message}
+                        </p>
+                        <p className="text-[10px] text-[hsl(var(--muted-foreground))] mt-1 opacity-70">
+                          {new Date(notification.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                      {!notification.read && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); dismissNotification(notification.id); }}
+                          className="absolute right-2 top-2 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-[hsl(var(--background))] transition-opacity"
+                          title="Mark as read"
+                        >
+                          <X size={14} className="text-[hsl(var(--muted-foreground))]" />
+                        </button>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* User menu */}
@@ -344,10 +471,12 @@ export function TopBar({ onMenuToggle, userName }: TopBarProps) {
       </div>
       </header>
 
-      {/* Mobile Floating Search */}
-      <div className="md:hidden fixed bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-3rem)] max-w-[320px] flex items-center gap-2 z-50 shadow-2xl bg-[hsl(var(--background)/0.95)] backdrop-blur-md p-1.5 rounded-2xl border border-[hsl(var(--border))]">
-        {searchInputContent}
-      </div>
+      {/* Mobile Floating Search — hidden on settings page */}
+      {!isSettingsPage && (
+        <div className="md:hidden fixed bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-3rem)] max-w-[320px] flex items-center gap-2 z-50 shadow-2xl bg-[hsl(var(--background)/0.95)] backdrop-blur-md p-1.5 rounded-2xl border border-[hsl(var(--border))]">
+          {searchInputContent}
+        </div>
+      )}
     </>
   );
 }

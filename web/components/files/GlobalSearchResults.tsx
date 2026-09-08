@@ -9,7 +9,7 @@ import { Loader2, Search } from "lucide-react";
 import { useTopBar } from "@/components/layout/TopBarContext";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
 
-type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
+type FileNodeWithThumbnail = FileNode & { contentIdentity: ({ thumbnail: Thumbnail | null, preview: Preview | null }) | null };
 
 interface GlobalSearchResultsProps {
   query: string;
@@ -61,7 +61,7 @@ export function GlobalSearchResults({ query, onClose }: GlobalSearchResultsProps
       const fileResults = results.filter(r => r.type === "FILE");
       const siblings: MediaSibling[] = fileResults.map((fn) => ({
         id: fn.id, name: fn.name, relativePath: fn.relativePath,
-        mimeType: fn.mimeType, cachePath: fn.preview?.cachePath || fn.thumbnail?.cachePath,
+        mimeType: fn.mimeType, cachePath: fn.contentIdentity?.preview?.cachePath || fn.contentIdentity?.thumbnail?.cachePath,
       }));
       setViewer({ node: n, siblings });
     } else if (n.type === "DIRECTORY") {
@@ -104,7 +104,7 @@ export function GlobalSearchResults({ query, onClose }: GlobalSearchResultsProps
           relativePath={viewer.node.relativePath}
           name={viewer.node.name}
           mimeType={viewer.node.mimeType}
-          cachePath={viewer.node.preview?.cachePath || viewer.node.thumbnail?.cachePath}
+          cachePath={viewer.node.contentIdentity?.preview?.cachePath || viewer.node.contentIdentity?.thumbnail?.cachePath}
           onClose={() => setViewer(null)}
           siblings={viewer.siblings}
           currentId={viewer.node.id}

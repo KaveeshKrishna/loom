@@ -23,7 +23,7 @@ export async function GET() {
   }
 
   const caches = await prisma.videoCache.findMany({
-    select: { sizeBytes: true, fileNodeId: true },
+    select: { sizeBytes: true, contentIdentityId: true },
   });
 
   const totalBytes = caches.reduce((sum, c) => sum + Number(c.sizeBytes), 0);

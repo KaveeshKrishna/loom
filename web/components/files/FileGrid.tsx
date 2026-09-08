@@ -1,7 +1,7 @@
 "use client";
 import React, { useRef } from "react";
 
-import { Folder, FileText, Image as ImageIcon, Video, Music, File, MoreVertical } from "lucide-react";
+import { Folder, FileText, Image as ImageIcon, Video, Music, File, MoreVertical, CheckCircle2 } from "lucide-react";
 import { cn, formatBytes, getFileCategory } from "@/lib/utils";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
 import { useTopBar } from "../layout/TopBarContext";
@@ -9,7 +9,7 @@ import { useContextMenu } from "@/hooks/useContextMenu";
 import { ContextMenu } from "./ContextMenu";
 import { FolderSize } from "./FolderSize";
 
-type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
+type FileNodeWithThumbnail = FileNode & { contentIdentity: ({ thumbnail: Thumbnail | null, preview: Preview | null }) | null };
 
 interface FileGridProps {
   nodes: FileNodeWithThumbnail[];
@@ -17,6 +17,8 @@ interface FileGridProps {
   onFavorite?: (nodeId: string) => void;
   favoriteIds?: Set<string>;
   showPath?: boolean;
+  selectedIds?: Set<string>;
+  onSelect?: (id: string, multi: boolean, shift: boolean) => void;
 }
 
 function FileIcon({ mimeType, type }: { mimeType: string | null; type: string }) {
@@ -29,7 +31,7 @@ function FileIcon({ mimeType, type }: { mimeType: string | null; type: string })
   return <File size={24} className="text-[hsl(var(--muted-foreground))]" />;
 }
 
-export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds, showPath }: FileGridProps) {
+export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds, showPath, selectedIds, onSelect }: FileGridProps) {
   const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFiredRef = useRef(false);
   const contextMenu = useContextMenu();
@@ -65,10 +67,17 @@ export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
               e.stopPropagation();
               return;
             }
+            if (e.shiftKey || e.metaKey || e.ctrlKey) {
+              e.preventDefault();
+              e.stopPropagation();
+              onSelect?.(node.id, e.metaKey || e.ctrlKey, e.shiftKey);
+              return;
+            }
             onNavigate(node);
           }}
           onContextMenu={(e: React.MouseEvent) => {
             e.preventDefault();
+            e.stopPropagation();
             contextMenu.open(e, node);
           }}
           onTouchStart={(e: React.TouchEvent) => {
@@ -88,15 +97,34 @@ export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
               if (e.cancelable) e.preventDefault();
             }
           }}
-          className="group relative flex flex-col gap-2 p-3 rounded-xl border bg-[hsl(var(--card))] hover:border-[hsl(var(--primary)/0.3)] hover:shadow-md active:scale-[0.98] active:bg-[hsl(var(--accent)/0.5)] transition-all duration-150 text-left animate-in-fade"
+          className={cn(
+            "group relative flex flex-col gap-2 p-3 rounded-xl border bg-[hsl(var(--card))] hover:shadow-md active:scale-[0.98] active:bg-[hsl(var(--accent)/0.5)] transition-all duration-150 text-left animate-in-fade",
+            selectedIds?.has(node.id) ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary)/0.05)] ring-1 ring-[hsl(var(--primary)/0.3)]" : "hover:border-[hsl(var(--primary)/0.3)]"
+          )}
         >
+          {/* Checkbox (visible on hover or if selected) */}
+          {onSelect && (
+            <div 
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelect(node.id, e.metaKey || e.ctrlKey, e.shiftKey);
+              }}
+              className={cn(
+                "absolute top-2 left-2 z-10 rounded-full transition-opacity cursor-pointer",
+                selectedIds?.has(node.id) ? "opacity-100 text-[hsl(var(--primary))]" : "opacity-0 group-hover:opacity-100 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+              )}
+            >
+              <CheckCircle2 size={20} fill={selectedIds?.has(node.id) ? "currentColor" : "transparent"} className={selectedIds?.has(node.id) ? "text-[hsl(var(--background))]" : ""} />
+            </div>
+          )}
+
           {/* Thumbnail or icon */}
           {/* Videos store their poster in the `previews` table; images use `thumbnails` */}
           <div className="aspect-square rounded-lg bg-[hsl(var(--accent))] flex items-center justify-center overflow-hidden">
-            {(node.thumbnail || node.preview) ? (
+            {(node.contentIdentity?.thumbnail || node.contentIdentity?.preview) ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={`/api/cache/${node.preview?.cachePath ?? node.thumbnail!.cachePath}`}
+                src={`/api/cache/${node.contentIdentity?.preview?.cachePath ?? node.contentIdentity?.thumbnail!.cachePath}`}
                 alt={node.name}
                 className="w-full h-full object-cover"
                 loading="lazy"
@@ -149,6 +177,7 @@ export function FileGrid({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
           onClose={contextMenu.close} 
           onFavorite={onFavorite} 
           isFavorite={favoriteIds?.has(contextMenu.node.id)} 
+          selectedNodes={selectedIds ? nodes.filter(n => selectedIds.has(n.id)) : undefined}
         />
       )}
     </div>

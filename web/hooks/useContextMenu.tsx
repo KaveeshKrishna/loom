@@ -10,7 +10,7 @@ export function useContextMenu() {
   const [position, setPosition] = useState<ContextMenuPosition | null>(null);
   const [node, setNode] = useState<FileNode | null>(null);
 
-  const open = useCallback((e: React.MouseEvent | React.TouchEvent | CustomEvent, nodeData: FileNode, buttonRef?: RefObject<HTMLElement | null>) => {
+  const open = useCallback((e: React.MouseEvent | React.TouchEvent | CustomEvent, nodeData: FileNode | null = null, buttonRef?: RefObject<HTMLElement | null>) => {
     // If opened programmatically via button
     if (buttonRef?.current) {
       const rect = buttonRef.current.getBoundingClientRect();
