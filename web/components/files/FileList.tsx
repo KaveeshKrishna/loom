@@ -1,14 +1,15 @@
 "use client";
 import React, { useRef } from "react";
 
-import { Folder, FileText, Image as ImageIcon, Video, Music, File, ChevronRight, MoreVertical } from "lucide-react";
-import { formatBytes, formatDate, getFileCategory } from "@/lib/utils";
+import { Folder, ChevronRight, MoreVertical, CheckCircle2 } from "lucide-react";
+import { cn, formatBytes, formatDate } from "@/lib/utils";
 import type { FileNode, Thumbnail, Preview } from "@prisma/client";
 import { useContextMenu } from "@/hooks/useContextMenu";
 import { ContextMenu } from "./ContextMenu";
 import { FolderSize } from "./FolderSize";
+import { FileIcon } from "./FileIcon";
 
-type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null, preview: Preview | null };
+type FileNodeWithThumbnail = FileNode & { contentIdentity: ({ thumbnail: Thumbnail | null, preview: Preview | null }) | null };
 
 interface FileListProps {
   nodes: FileNodeWithThumbnail[];
@@ -16,19 +17,13 @@ interface FileListProps {
   onFavorite?: (nodeId: string) => void;
   favoriteIds?: Set<string>;
   showPath?: boolean;
+  selectedIds?: Set<string>;
+  onSelect?: (id: string, multi: boolean, shift: boolean) => void;
 }
 
-function FileIcon({ mimeType, type, size = 16 }: { mimeType: string | null; type: string; size?: number }) {
-  if (type === "DIRECTORY") return <Folder size={size} className="text-[hsl(var(--primary))]" />;
-  const cat = getFileCategory(mimeType);
-  if (cat === "image") return <ImageIcon size={size} className="text-violet-500" />;
-  if (cat === "video") return <Video size={size} className="text-rose-500" />;
-  if (cat === "audio") return <Music size={size} className="text-amber-500" />;
-  if (cat === "document") return <FileText size={size} className="text-blue-500" />;
-  return <File size={size} className="text-[hsl(var(--muted-foreground))]" />;
-}
 
-export function FileList({ nodes, onNavigate, onFavorite, favoriteIds, showPath }: FileListProps) {
+
+export function FileList({ nodes, onNavigate, onFavorite, favoriteIds, showPath, selectedIds, onSelect }: FileListProps) {
   const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFiredRef = useRef(false);
   const contextMenu = useContextMenu();
@@ -54,17 +49,28 @@ export function FileList({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
       {nodes.map((node) => (
         <div
           key={node.id}
-          className="group flex items-center px-4 py-2.5 gap-3 hover:bg-[hsl(var(--accent)/0.5)] active:bg-[hsl(var(--accent))] active:scale-[0.99] transition-all cursor-pointer"
+          id={`file-${node.id}`}
+          className={cn(
+            "group flex items-center px-4 py-2.5 gap-3 hover:bg-[hsl(var(--accent)/0.5)] active:bg-[hsl(var(--accent))] active:scale-[0.99] transition-all cursor-pointer",
+            selectedIds?.has(node.id) ? "bg-[hsl(var(--accent)/0.8)]" : ""
+          )}
           onClick={(e) => {
             if (longPressFiredRef.current) {
               e.preventDefault();
               e.stopPropagation();
               return;
             }
+            if (e.shiftKey || e.metaKey || e.ctrlKey) {
+              e.preventDefault();
+              e.stopPropagation();
+              onSelect?.(node.id, e.metaKey || e.ctrlKey, e.shiftKey);
+              return;
+            }
             onNavigate(node);
           }}
           onContextMenu={(e: React.MouseEvent) => {
             e.preventDefault();
+            e.stopPropagation();
             contextMenu.open(e, node);
           }}
           onTouchStart={(e: React.TouchEvent) => {
@@ -84,11 +90,28 @@ export function FileList({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
               if (e.cancelable) e.preventDefault();
             }
           }}
-          id={`file-row-${node.id}`}
         >
+          {/* Left section: Checkbox and Icon */}
+          <div className="flex items-center gap-3 shrink-0">
+            {onSelect && (
+              <div 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelect(node.id, e.metaKey || e.ctrlKey, e.shiftKey);
+                }}
+                className={cn(
+                  "rounded-full transition-opacity cursor-pointer",
+                  selectedIds?.has(node.id) ? "opacity-100 text-[hsl(var(--primary))]" : "opacity-0 group-hover:opacity-100 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+                )}
+              >
+                <CheckCircle2 size={20} fill={selectedIds?.has(node.id) ? "currentColor" : "transparent"} className={selectedIds?.has(node.id) ? "text-[hsl(var(--background))]" : ""} />
+              </div>
+            )}
+            <FileIcon mimeType={node.mimeType} type={node.type} />
+          </div>
+
           {/* Icon + Name — takes all remaining space, truncates */}
           <div className="flex items-center gap-2.5 flex-1 min-w-0">
-            <FileIcon mimeType={node.mimeType} type={node.type} />
             <div className="flex flex-col min-w-0 flex-1">
               <span className="text-sm font-medium truncate">{node.name}</span>
               {showPath && (
@@ -135,7 +158,8 @@ export function FileList({ nodes, onNavigate, onFavorite, favoriteIds, showPath 
           position={contextMenu.position} 
           onClose={contextMenu.close} 
           onFavorite={onFavorite} 
-          isFavorite={favoriteIds?.has(contextMenu.node.id)} 
+          isFavorite={favoriteIds?.has(contextMenu.node.id)}
+          selectedNodes={selectedIds ? nodes.filter(n => selectedIds.has(n.id)) : undefined}
         />
       )}
     </div>

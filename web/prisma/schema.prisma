@@ -22,12 +22,15 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  sessions      Session[]
-  accounts      Account[]
-  aclRules      AclRule[]
-  favorites     Favorite[]
-  auditLogs     AuditLog[]
-  scanJobs      ScanJob[]
+  sessions       Session[]
+  accounts       Account[]
+  aclRules       AclRule[]
+  favorites      Favorite[]
+  auditLogs      AuditLog[]
+  scanJobs       ScanJob[]
+  trashItems     TrashItem[]
+  backgroundJobs BackgroundJob[]
+  notifications  Notification[]
 
   @@map("users")
 }
@@ -101,33 +104,92 @@ model AclRule {
 }
 
 // ─────────────────────────────────────────────
+// CONTENT IDENTITY
+// Represents unique file content, decoupled from filesystem location.
+// Multiple FileNodes can share one ContentIdentity — enabling
+// one physical thumbnail/preview for N identical files.
+// Computed lazily (only when file is actually read). Never during
+// plain metadata-only Rescan, preserving the idle-SSD optimization.
+// ─────────────────────────────────────────────
+
+model ContentIdentity {
+  id        String   @id @default(cuid())
+  size      BigInt
+  // SHA-256 of first 1MB + last 1MB — highly reliable candidate identity.
+  // Not mathematical proof of bit-identical content; sufficient for deduplication.
+  fastHash  String
+  createdAt DateTime @default(now())
+
+  nodes       FileNode[]
+  thumbnail   Thumbnail?
+  preview     Preview?
+  videoCaches VideoCache[]
+
+  @@unique([size, fastHash])
+  @@map("content_identities")
+}
+
+// ─────────────────────────────────────────────
 // FILE INDEX
 // ─────────────────────────────────────────────
 
+enum HealthStatus {
+  // File is accessible and processable.
+  HEALTHY
+  // File is valid/recognizable but Loom's pipeline does not support it.
+  // Must NOT be shown to the user as corrupt — only as unsupported.
+  UNSUPPORTED
+  // File appears structurally damaged or invalid based on attempted analysis.
+  CORRUPT
+}
+
 model FileNode {
-  id                String      @id @default(cuid())
-  relativePath      String      @unique  // e.g. "Pics/Vacation/IMG_0001.jpg"
+  id                String       @id @default(cuid())
+  // Current logical filesystem location relative to /media.
+  // NOT @unique — uniqueness enforced at application level to allow
+  // safe Trash state management without ambiguous DB constraints.
+  relativePath      String
   name              String
   type              NodeType
   mimeType          String?
   size              BigInt?
   modifiedAt        DateTime?
   sha256            String?
-  indexedAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
-  isVisible         Boolean     @default(true)  // false for OS metadata dirs
-  // Derived media identity — "${size}-${mtimeMs}"; null until first scan
+  indexedAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  isVisible         Boolean      @default(true)  // false for OS metadata dirs
+
+  // Metadata-only file identity — "${size}-${mtimeMs}"; null until first scan.
+  // Used ONLY to detect external modifications. NOT a content identity.
   sourceVersion     String?
+
   // null = unknown (not yet probed), true = native browser playback, false = needs HLS
   browserCompatible Boolean?
 
-  thumbnail    Thumbnail?
-  preview      Preview?
+  // Content-based identity — resolved lazily when file is actually read.
+  // Enables sharing derived media across identical files.
+  // Reset to null when sourceVersion changes (re-evaluation required).
+  contentIdentityId String?
+  contentIdentity   ContentIdentity? @relation(fields: [contentIdentityId], references: [id], onDelete: SetNull)
+
+  // File health — tied to sourceVersion at check time.
+  // Invalidated when sourceVersion changes. HEALTHY by default.
+  healthStatus         HealthStatus @default(HEALTHY)
+  // Error/diagnostic message from ffprobe/sharp/etc.
+  healthError          String?
+  // The sourceVersion when health was last checked — used to skip redundant analysis.
+  healthCheckedVersion String?
+
+  // Trash state — true while item lives in .LoomTrash
+  inTrash      Boolean   @default(false)
+  trashItem    TrashItem?
+
   favorites    Favorite[]
-  videoCaches  VideoCache[]  // 1-to-many: allows safe GC of old sourceVersion caches
 
   @@index([relativePath])
   @@index([type])
+  @@index([inTrash])
+  @@index([healthStatus])
   @@map("file_nodes")
 }
 
@@ -138,57 +200,64 @@ enum NodeType {
 
 // ─────────────────────────────────────────────
 // THUMBNAILS & PREVIEWS (stored in /cache)
+// Now keyed to ContentIdentity, not FileNode.
+// Multiple identical files share one thumbnail/preview record.
+// profileVersion guards against stale caches if generation params change.
 // ─────────────────────────────────────────────
 
 model Thumbnail {
-  id            String   @id @default(cuid())
-  fileNodeId    String   @unique
-  cachePath     String   // Relative to /cache, e.g. "thumbnails/{fileNodeId}_{sourceVersion}.webp"
-  width         Int
-  height        Int
-  generatedAt   DateTime @default(now())
-  // sourceVersion this thumbnail was generated from; "legacy" for pre-migration records
-  sourceVersion String   @default("legacy")
+  id                String          @id @default(cuid())
+  contentIdentityId String          @unique
+  // Relative to /cache, e.g. "thumbnails/{contentIdentityId}_v1.webp"
+  cachePath         String
+  width             Int
+  height            Int
+  generatedAt       DateTime        @default(now())
+  // Increment this constant in code when thumbnail generation params change
+  // to prevent old caches from being reused with new settings.
+  profileVersion    String          @default("v1")
 
-  fileNode      FileNode @relation(fields: [fileNodeId], references: [id], onDelete: Cascade)
+  contentIdentity   ContentIdentity @relation(fields: [contentIdentityId], references: [id], onDelete: Cascade)
 
   @@map("thumbnails")
 }
 
 model Preview {
-  id            String   @id @default(cuid())
-  fileNodeId    String   @unique
-  cachePath     String   // Relative to /cache, e.g. "previews/{fileNodeId}_{sourceVersion}.webp"
-  width         Int?
-  height         Int?
-  generatedAt   DateTime @default(now())
-  // sourceVersion this preview was generated from; "legacy" for pre-migration records
-  sourceVersion String   @default("legacy")
+  id                String          @id @default(cuid())
+  contentIdentityId String          @unique
+  // Relative to /cache, e.g. "previews/{contentIdentityId}_v1.webp"
+  cachePath         String
+  width             Int?
+  height            Int?
+  generatedAt       DateTime        @default(now())
+  profileVersion    String          @default("v1")
 
-  fileNode      FileNode @relation(fields: [fileNodeId], references: [id], onDelete: Cascade)
+  contentIdentity   ContentIdentity @relation(fields: [contentIdentityId], references: [id], onDelete: Cascade)
 
   @@map("previews")
 }
 
 // ─────────────────────────────────────────────
 // VIDEO HLS CACHE (stored in /cache/videos/)
+// Now keyed to ContentIdentity + profileVersion.
+// profileVersion prevents incorrect HLS reuse after FFmpeg setting changes.
 // ─────────────────────────────────────────────
 
 model VideoCache {
-  id              String          @id @default(cuid())
-  fileNodeId      String
-  // sourceVersion at generation time — must match FileNode.sourceVersion to be valid
-  sourceVersion   String
-  // relative to /cache, e.g. "videos/{fileNodeId}/{sourceVersion}"
-  cacheDir        String
-  sizeBytes       BigInt          @default(0)
-  durationSeconds Float?          // from ffprobe, stored once, reused
-  lastAccessedAt  DateTime        @default(now())
+  id                String          @id @default(cuid())
+  contentIdentityId String
+  // Encoding profile version — keyed by contentIdentity + profileVersion.
+  // Ensures HLS cache is not reused across encoding-setting changes.
+  profileVersion    String          @default("v1")
+  // relative to /cache, e.g. "videos/{contentIdentityId}/v1"
+  cacheDir          String
+  sizeBytes         BigInt          @default(0)
+  durationSeconds   Float?          // from ffprobe, stored once, reused
+  lastAccessedAt    DateTime        @default(now())
 
-  fileNode        FileNode        @relation(fields: [fileNodeId], references: [id], onDelete: Cascade)
+  contentIdentity   ContentIdentity @relation(fields: [contentIdentityId], references: [id], onDelete: Cascade)
 
-  // Composite unique: allows old + new sourceVersion records to coexist during GC
-  @@unique([fileNodeId, sourceVersion])
+  @@unique([contentIdentityId, profileVersion])
   @@map("video_cache")
 }
 
@@ -274,4 +343,79 @@ model AuditLog {
 
   @@index([timestamp])
   @@map("audit_logs")
+}
+
+// ─────────────────────────────────────────────
+// TRASH
+// Three path concepts explicitly separated:
+//   FileNode.relativePath    = current logical filesystem location
+//   TrashItem.originalPath   = exact path before deletion (for restore)
+//   TrashItem.trashPath      = physical path inside .LoomTrash/
+// Restoration stops (409) if originalPath is occupied — no silent renames.
+// ─────────────────────────────────────────────
+
+model TrashItem {
+  id              String   @id @default(cuid())
+  fileNodeId      String   @unique
+  // Exact original relative path before deletion — used to detect restore conflicts
+  originalPath    String
+  // Physical path inside /media/.LoomTrash/
+  trashPath       String
+  deletedAt       DateTime @default(now())
+  // Automatically purged 15 days after deletion
+  expiresAt       DateTime
+  deletedByUserId String
+
+  user            User     @relation(fields: [deletedByUserId], references: [id])
+  fileNode        FileNode @relation(fields: [fileNodeId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("trash_items")
+}
+
+// ─────────────────────────────────────────────
+// BACKGROUND JOBS
+// Tracks long-running server-side operations (large copy/move/folder delete)
+// ─────────────────────────────────────────────
+
+model BackgroundJob {
+  id          String   @id @default(cuid())
+  // COPY, MOVE, FOLDER_DELETE, UPLOAD_FINALIZE
+  type        String
+  // PENDING, RUNNING, COMPLETED, FAILED, CANCELLED
+  status      String
+  // Operation-specific payload (source, dest, fileNodeIds, etc.)
+  payload     Json
+  error       String?
+  progress    Int      @default(0)  // 0–100
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  userId      String
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@map("background_jobs")
+}
+
+// ─────────────────────────────────────────────
+// NOTIFICATIONS
+// User-facing alerts: interrupted uploads, server-restart failures, etc.
+// Stored per-user, survive page refresh, have read/unread state.
+// ─────────────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  // UPLOAD_INTERRUPTED, UPLOAD_FAILED, OPERATION_FAILED
+  type      String
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@map("notifications")
 }

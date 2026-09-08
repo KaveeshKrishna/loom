@@ -6,10 +6,9 @@ import { usePathname } from "next/navigation";
 import { useRef, useCallback } from "react";
 import {
   Star, FolderOpen, Image, Video, FileText,
-  Settings, ChevronRight, X, MoreVertical
+  Settings, ChevronRight, X, MoreVertical, Trash2, ShieldAlert
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ArchiveStatusBadge } from "@/components/ui/ArchiveStatusBadge";
 import { useTopBar } from "./TopBarContext";
 
 import { useContextMenu } from "@/hooks/useContextMenu";
@@ -22,6 +21,8 @@ const navItems = [
   { href: "/photos", label: "Photos", icon: Image },
   { href: "/videos", label: "Videos", icon: Video },
   { href: "/documents", label: "Documents", icon: FileText },
+  { href: "/trash", label: "Trash", icon: Trash2 },
+  { href: "/health", label: "File Health", icon: ShieldAlert },
 ];
 
 interface SidebarProps {
@@ -200,7 +201,6 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, colla
 
       {/* Footer */}
       <div className={cn("px-3 py-3 border-t border-[hsl(var(--sidebar-border))] space-y-2", collapsed && "flex flex-col items-center px-0")}>
-        {!collapsed && <ArchiveStatusBadge />}
         <div className={cn("flex items-center", collapsed ? "justify-center" : "gap-2.5 px-1 py-1")}>
           <div className="w-7 h-7 rounded-full bg-[hsl(var(--primary)/0.15)] flex items-center justify-center shrink-0">
             <span className="text-xs font-semibold text-[hsl(var(--primary))]">

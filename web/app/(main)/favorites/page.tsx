@@ -10,7 +10,7 @@ import { useTopBar } from "@/components/layout/TopBarContext";
 import { sortNodes } from "@/lib/utils";
 import { useInfiniteNodes } from "@/hooks/useInfiniteNodes";
 
-type FileNodeWithThumbnail = FileNode & { thumbnail: Thumbnail | null; preview: Preview | null };
+type FileNodeWithThumbnail = FileNode & { contentIdentity: ({ thumbnail: Thumbnail | null; preview: Preview | null }) | null };
 type FavoriteItem = { id: string; fileNodeId: string; fileNode: FileNodeWithThumbnail };
 
 export default function FavoritesPage() {
@@ -71,7 +71,7 @@ export default function FavoritesPage() {
             if (n.type !== "FILE") return;
             const siblings: MediaSibling[] = sortedNodes.filter((m) => m.type === "FILE").map((fn) => ({
               id: fn.id, name: fn.name, relativePath: fn.relativePath,
-              mimeType: fn.mimeType, cachePath: fn.preview?.cachePath || fn.thumbnail?.cachePath,
+              mimeType: fn.mimeType, cachePath: fn.contentIdentity?.preview?.cachePath || fn.contentIdentity?.thumbnail?.cachePath,
             }));
             setViewer({ node: n, siblings });
           }}
@@ -85,7 +85,7 @@ export default function FavoritesPage() {
             if (n.type !== "FILE") return;
             const siblings: MediaSibling[] = sortedNodes.filter((m) => m.type === "FILE").map((fn) => ({
               id: fn.id, name: fn.name, relativePath: fn.relativePath,
-              mimeType: fn.mimeType, cachePath: fn.preview?.cachePath || fn.thumbnail?.cachePath,
+              mimeType: fn.mimeType, cachePath: fn.contentIdentity?.preview?.cachePath || fn.contentIdentity?.thumbnail?.cachePath,
             }));
             setViewer({ node: n, siblings });
           }}
@@ -105,7 +105,7 @@ export default function FavoritesPage() {
       {viewer && (
         <MediaViewer
           relativePath={viewer.node.relativePath}
-          cachePath={viewer.node.preview?.cachePath || viewer.node.thumbnail?.cachePath}
+          cachePath={viewer.node.contentIdentity?.preview?.cachePath || viewer.node.contentIdentity?.thumbnail?.cachePath}
           name={viewer.node.name}
           mimeType={viewer.node.mimeType}
           onClose={() => setViewer(null)}

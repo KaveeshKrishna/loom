@@ -2,7 +2,6 @@ services:
   # ── PostgreSQL ──────────────────────────────────────────────────────────────
   postgres:
     image: postgres:17-alpine
-    container_name: loom-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: loom
@@ -21,42 +20,50 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
-    container_name: loom-web
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8085:3000"
+      - "${LOOM_BIND:-127.0.0.1}:${LOOM_PORT:-8085}:3000"
     env_file:
       - .env
     environment:
       DATABASE_URL: postgresql://loom:${POSTGRES_PASSWORD}@postgres:5432/loom
     volumes:
-      - /srv/storage/personal/media:/media
-      - /srv/data/gallery-cache:/cache
+      - ${LOOM_MEDIA_PATH:-./data/media}:/media
+      - ${LOOM_CACHE_PATH:-./data/cache}:/cache
     depends_on:
       postgres:
         condition: service_healthy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 -O- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # ── Scanner ─────────────────────────────────────────────────────────────────
   loom-scanner:
     build:
       context: ./scanner
       dockerfile: Dockerfile
-    container_name: loom-scanner
     restart: unless-stopped
     env_file:
       - .env
     environment:
       DATABASE_URL: postgresql://loom:${POSTGRES_PASSWORD}@postgres:5432/loom
     volumes:
-      - /srv/storage/personal/media:/media
-      - /srv/data/gallery-cache:/cache
+      - ${LOOM_MEDIA_PATH:-./data/media}:/media
+      - ${LOOM_CACHE_PATH:-./data/cache}:/cache
       # Share web's prisma schema for client generation
       - ./web/prisma:/app/prisma:ro
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'tsx src/index.ts' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 volumes:
   postgres_data:

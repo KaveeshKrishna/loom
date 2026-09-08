@@ -33,9 +33,10 @@ export async function GET(req: NextRequest) {
   const results = await prisma.fileNode.findMany({
     where: {
       isVisible: true,
+      inTrash: false,
       mimeType: mimeTypeFilter,
     },
-    include: { thumbnail: true, preview: true },
+    include: { contentIdentity: { include: { thumbnail: true, preview: true } } },
     orderBy: { updatedAt: "desc" },
     take: limit + 1,                    // fetch one extra to determine if there's a next page
     ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),

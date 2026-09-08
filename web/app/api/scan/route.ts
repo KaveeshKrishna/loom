@@ -69,7 +69,14 @@ export async function DELETE(req: NextRequest) {
 
   const { searchParams } = req.nextUrl;
   const id = searchParams.get("id");
-  if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+
+  if (!id) {
+    // Clear all finished jobs (COMPLETED, FAILED, CANCELLED)
+    await prisma.scanJob.deleteMany({
+      where: { status: { in: ["COMPLETED", "FAILED", "CANCELLED"] } },
+    });
+    return NextResponse.json({ success: true });
+  }
 
   const job = await prisma.scanJob.findUnique({ where: { id } });
   if (!job) return NextResponse.json({ error: "Not found" }, { status: 404 });

@@ -31,13 +31,13 @@ export async function GET(req: NextRequest) {
   const allNodes = await prisma.fileNode.findMany({
     where: {
       isVisible: true,
+      inTrash: false,
       relativePath: {
         startsWith: prefix,
       },
     },
     include: {
-      thumbnail: true,
-      preview: true,
+      contentIdentity: { include: { thumbnail: true, preview: true } },
     },
   });
 

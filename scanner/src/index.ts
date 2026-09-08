@@ -1,11 +1,12 @@
 import { PrismaClient } from "@prisma/client";
-import { readdir, stat, access, mkdir, writeFile, unlink, rm, rename } from "fs/promises";
-import { join, relative, extname, basename, dirname } from "path";
+import { readdir, stat, access, mkdir, rm, rename } from "fs/promises";
+import { join, relative, extname, basename } from "path";
+import { createReadStream, constants } from "fs";
+import type { Stats } from "fs";
+import { createHash } from "crypto";
 import sharp from "sharp";
 import mime from "mime-types";
-import { constants } from "fs";
 import { spawn } from "child_process";
-import { createHash } from "crypto";
 
 const prisma = new PrismaClient();
 
@@ -15,6 +16,9 @@ const THUMB_DIR = join(CACHE_ROOT, "thumbnails");
 const PREVIEW_DIR = join(CACHE_ROOT, "previews");
 const VIDEO_CACHE_DIR = join(CACHE_ROOT, "videos");
 const TEMP_DIR = join(CACHE_ROOT, "temp");
+
+const THUMB_PROFILE = "v1";   // Bump when thumbnail generation params change
+const PREVIEW_PROFILE = "v1"; // Bump when preview generation params change
 
 // Directories to permanently ignore — OS metadata and upload staging
 const IGNORED_DIRS = new Set([
@@ -28,6 +32,7 @@ const IGNORED_DIRS = new Set([
   "RECYCLER",
   "FOUND.000",
   ".tmp-upload",
+  ".LoomTrash",
 ]);
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".heic", ".gif", ".avif", ".thm", ".thim"]);
@@ -65,109 +70,216 @@ async function updateScannerStatus(status: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Cache helpers — NVMe only, never touches T7 unless cache is missing
+// NVMe dir helpers
 // ---------------------------------------------------------------------------
 
 async function ensureDir(dir: string) {
   await mkdir(dir, { recursive: true });
 }
 
-// Cache key for image thumbnails/previews: {fileNodeId}_{sourceVersion}
-// This is path-independent — moves/renames do not invalidate the cache.
-function thumbCachePath(fileNodeId: string, sourceVersion: string): string {
-  return `thumbnails/${fileNodeId}_${sourceVersion}.webp`;
-}
-function previewCachePath(fileNodeId: string, sourceVersion: string): string {
-  return `previews/${fileNodeId}_${sourceVersion}.webp`;
-}
-function videoThumbCachePath(fileNodeId: string, sourceVersion: string): string {
-  return `previews/video-${fileNodeId}_${sourceVersion}.webp`;
+// ---------------------------------------------------------------------------
+// ContentIdentity — lazy hash, only computed when file is actually read
+// ---------------------------------------------------------------------------
+
+/**
+ * Computes a fast hash of the file: SHA-256 of first 1MB + last 1MB.
+ * This is NOT a full checksum but is sufficient for deduplication.
+ * IMPORTANT: This reads from the physical disk. Only call when file is being read
+ * for thumbnail/preview generation anyway — never during metadata-only scans.
+ */
+async function computeFastHash(absolutePath: string, fileSize: number): Promise<string> {
+  const CHUNK = 1024 * 1024; // 1MB
+  const hash = createHash("sha256");
+
+  await new Promise<void>((resolve, reject) => {
+    const stream = createReadStream(absolutePath, { start: 0, end: Math.min(CHUNK - 1, fileSize - 1) });
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", resolve);
+    stream.on("error", reject);
+  });
+
+  if (fileSize > CHUNK) {
+    const lastStart = Math.max(CHUNK, fileSize - CHUNK);
+    await new Promise<void>((resolve, reject) => {
+      const stream = createReadStream(absolutePath, { start: lastStart, end: fileSize - 1 });
+      stream.on("data", (chunk) => hash.update(chunk));
+      stream.on("end", resolve);
+      stream.on("error", reject);
+    });
+  }
+
+  return hash.digest("hex");
 }
 
-// Returns relative cache path or null on permanent failure.
-// Checks .failed sentinel so permanently broken files are never retried.
+/**
+ * Resolves or creates the ContentIdentity for a file being actively read.
+ * This is called only when we are about to generate a thumbnail/preview.
+ */
+async function resolveContentIdentity(
+  absolutePath: string,
+  fileSize: number,
+  fileNodeId: string
+): Promise<string | null> {
+  try {
+    const fastHash = await computeFastHash(absolutePath, fileSize);
+    const size = BigInt(fileSize);
+
+    const identity = await prisma.contentIdentity.upsert({
+      where: { size_fastHash: { size, fastHash } },
+      update: {},
+      create: { size, fastHash },
+    });
+
+    // Link the FileNode to this ContentIdentity
+    await prisma.fileNode.update({
+      where: { id: fileNodeId },
+      data: { contentIdentityId: identity.id },
+    });
+
+    return identity.id;
+  } catch (err) {
+    log("WARN", `Could not resolve ContentIdentity for ${absolutePath}`, { error: String(err) });
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cache path helpers — keyed to ContentIdentity, never FileNode
+// ---------------------------------------------------------------------------
+
+function thumbCachePath(contentIdentityId: string): string {
+  return `thumbnails/${contentIdentityId}_${THUMB_PROFILE}.webp`;
+}
+
+function previewCachePath(contentIdentityId: string): string {
+  return `previews/${contentIdentityId}_${PREVIEW_PROFILE}.webp`;
+}
+
+function videoThumbCachePath(contentIdentityId: string): string {
+  return `previews/video-${contentIdentityId}_${THUMB_PROFILE}.webp`;
+}
+
+// ---------------------------------------------------------------------------
+// Thumbnail / Preview generation — ContentIdentity-keyed
+// The "file is already read" invariant: by the time we call these, we've
+// already computed the ContentIdentity (which required reading the file).
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates an image thumbnail and records it in the Thumbnail table.
+ * Returns the cache relative path on success, null on failure.
+ * Updates FileNode.healthStatus to CORRUPT if sharp fails irrecoverably.
+ */
 async function generateThumbnail(
   absolutePath: string,
+  contentIdentityId: string,
   fileNodeId: string,
-  sourceVersion: string,
-  forceRetryFailed: boolean = false
+  forceRegenerate = false
 ): Promise<string | null> {
-  const relPath = thumbCachePath(fileNodeId, sourceVersion);
+  const relPath = thumbCachePath(contentIdentityId);
   const thumbPath = join(CACHE_ROOT, relPath);
-  const failedPath = thumbPath.replace(".webp", ".failed");
 
-  try { await access(thumbPath, constants.R_OK); return relPath; } catch {}
-  if (!forceRetryFailed) {
-    try { await access(failedPath, constants.F_OK); return null; } catch {}
-  } else {
-    await unlink(failedPath).catch(() => {});
+  // Check existing record at the ContentIdentity level
+  const existing = await prisma.thumbnail.findUnique({ where: { contentIdentityId } });
+  if (existing && existing.profileVersion === THUMB_PROFILE) {
+    const onDisk = await access(thumbPath, constants.R_OK).then(() => true).catch(() => false);
+    if (onDisk && !forceRegenerate) return relPath;
   }
 
   try {
     await ensureDir(THUMB_DIR);
-    await sharp(absolutePath)
+    const meta = await sharp(absolutePath)
       .resize(320, 320, { fit: "cover", position: "centre" })
       .webp({ quality: 75 })
       .toFile(thumbPath);
+
+    await prisma.thumbnail.upsert({
+      where: { contentIdentityId },
+      update: { cachePath: relPath, width: 320, height: 320, profileVersion: THUMB_PROFILE },
+      create: { contentIdentityId, cachePath: relPath, width: 320, height: 320, profileVersion: THUMB_PROFILE },
+    });
+
+    // File is processable — mark HEALTHY (clear any previous error)
+    await prisma.fileNode.update({
+      where: { id: fileNodeId },
+      data: { healthStatus: "HEALTHY", healthError: null, healthCheckedVersion: null },
+    }).catch(() => {});
+
     return relPath;
-  } catch (err) {
-    log("WARN", `Thumbnail failed for ${fileNodeId} — writing sentinel`, { error: String(err) });
-    await writeFile(failedPath, "").catch(() => {});
+  } catch (err: any) {
+    log("WARN", `Thumbnail generation failed for ${absolutePath}`, { error: String(err) });
+    // Distinguish unsupported format from corrupted file
+    const isUnsupported = /unsupported|format|codec/i.test(String(err));
+    await prisma.fileNode.update({
+      where: { id: fileNodeId },
+      data: {
+        healthStatus: isUnsupported ? "UNSUPPORTED" : "CORRUPT",
+        healthError: String(err).slice(0, 1000),
+      },
+    }).catch(() => {});
     return null;
   }
 }
 
+/**
+ * Generates a full-resolution preview and records it in the Preview table.
+ */
 async function generatePreview(
   absolutePath: string,
+  contentIdentityId: string,
   fileNodeId: string,
-  sourceVersion: string,
-  forceRetryFailed: boolean = false
+  forceRegenerate = false
 ): Promise<string | null> {
-  const relPath = previewCachePath(fileNodeId, sourceVersion);
+  const relPath = previewCachePath(contentIdentityId);
   const previewPath = join(CACHE_ROOT, relPath);
-  const failedPath = previewPath.replace(".webp", ".failed");
 
-  try { await access(previewPath, constants.R_OK); return relPath; } catch {}
-  if (!forceRetryFailed) {
-    try { await access(failedPath, constants.F_OK); return null; } catch {}
-  } else {
-    await unlink(failedPath).catch(() => {});
+  const existing = await prisma.preview.findUnique({ where: { contentIdentityId } });
+  if (existing && existing.profileVersion === PREVIEW_PROFILE) {
+    const onDisk = await access(previewPath, constants.R_OK).then(() => true).catch(() => false);
+    if (onDisk && !forceRegenerate) return relPath;
   }
 
   try {
     await ensureDir(PREVIEW_DIR);
+    const imgMeta = await sharp(absolutePath).metadata();
     await sharp(absolutePath)
       .resize(1920, 1920, { fit: "inside", withoutEnlargement: true })
       .webp({ quality: 85 })
       .toFile(previewPath);
+
+    await prisma.preview.upsert({
+      where: { contentIdentityId },
+      update: { cachePath: relPath, width: imgMeta.width, height: imgMeta.height, profileVersion: PREVIEW_PROFILE },
+      create: { contentIdentityId, cachePath: relPath, width: imgMeta.width, height: imgMeta.height, profileVersion: PREVIEW_PROFILE },
+    });
+
     return relPath;
-  } catch (err) {
-    log("WARN", `Preview failed for ${fileNodeId} — writing sentinel`, { error: String(err) });
-    await writeFile(failedPath, "").catch(() => {});
+  } catch (err: any) {
+    log("WARN", `Preview generation failed for ${absolutePath}`, { error: String(err) });
     return null;
   }
 }
 
+/**
+ * Generates a video thumbnail (poster frame) via ffmpeg.
+ */
 async function generateVideoThumbnail(
   absolutePath: string,
+  contentIdentityId: string,
   fileNodeId: string,
-  sourceVersion: string,
-  forceRetryFailed: boolean = false
+  forceRegenerate = false
 ): Promise<string | null> {
-  const relPath = videoThumbCachePath(fileNodeId, sourceVersion);
+  const relPath = videoThumbCachePath(contentIdentityId);
   const posterPath = join(CACHE_ROOT, relPath);
-  const failedPath = posterPath.replace(".webp", ".failed");
 
-  try { await access(posterPath, constants.R_OK); return relPath; } catch {}
-  if (!forceRetryFailed) {
-    try { await access(failedPath, constants.F_OK); return null; } catch {}
-  } else {
-    await unlink(failedPath).catch(() => {});
+  const existing = await prisma.thumbnail.findUnique({ where: { contentIdentityId } });
+  if (existing && existing.profileVersion === THUMB_PROFILE) {
+    const onDisk = await access(posterPath, constants.R_OK).then(() => true).catch(() => false);
+    if (onDisk && !forceRegenerate) return relPath;
   }
 
   try {
     await ensureDir(PREVIEW_DIR);
-    // Spawn with argument array — no shell interpolation/injection
     await new Promise<void>((resolve, reject) => {
       const proc = spawn("ffmpeg", [
         "-y", "-ss", "1", "-i", absolutePath,
@@ -181,43 +293,53 @@ async function generateVideoThumbnail(
       proc.on("close", (code) => code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}: ${errLog}`)));
       proc.on("error", reject);
     });
+
+    await prisma.thumbnail.upsert({
+      where: { contentIdentityId },
+      update: { cachePath: relPath, width: 320, height: 320, profileVersion: THUMB_PROFILE },
+      create: { contentIdentityId, cachePath: relPath, width: 320, height: 320, profileVersion: THUMB_PROFILE },
+    });
+
+    await prisma.fileNode.update({
+      where: { id: fileNodeId },
+      data: { healthStatus: "HEALTHY", healthError: null },
+    }).catch(() => {});
+
     return relPath;
-  } catch (err) {
-    log("WARN", `Video thumbnail failed for ${fileNodeId} — writing sentinel`, { error: String(err) });
-    await writeFile(failedPath, "").catch(() => {});
+  } catch (err: any) {
+    log("WARN", `Video thumbnail failed for ${absolutePath}`, { error: String(err) });
+    const isUnsupported = /unsupported|codec|format/i.test(String(err));
+    await prisma.fileNode.update({
+      where: { id: fileNodeId },
+      data: {
+        healthStatus: isUnsupported ? "UNSUPPORTED" : "CORRUPT",
+        healthError: String(err).slice(0, 1000),
+      },
+    }).catch(() => {});
     return null;
   }
 }
 
 // ---------------------------------------------------------------------------
 // Invalidate derived media for a changed file
+// When a file changes (sourceVersion mismatch), we must:
+//   1. Clear the FileNode's contentIdentityId link (it may have new content)
+//   2. Leave the ContentIdentity and its cached media alone — other FileNodes
+//      might still reference the same content (e.g. duplicates).
+//   3. The old ContentIdentity will be cleaned up by Orphan GC if nothing references it.
 // ---------------------------------------------------------------------------
 
-async function invalidateDerivedMedia(fileNodeId: string, oldSourceVersion: string | null) {
-  // Delete stale Thumbnail record and NVMe files
-  const thumb = await prisma.thumbnail.findUnique({ where: { fileNodeId } });
-  if (thumb) {
-    await prisma.thumbnail.delete({ where: { fileNodeId } }).catch(() => {});
-    const absPath = join(CACHE_ROOT, thumb.cachePath);
-    await unlink(absPath).catch(() => {});
-    await unlink(absPath.replace(".webp", ".failed")).catch(() => {});
-  }
-
-  // Delete stale Preview record and NVMe files
-  const preview = await prisma.preview.findUnique({ where: { fileNodeId } });
-  if (preview) {
-    await prisma.preview.delete({ where: { fileNodeId } }).catch(() => {});
-    const absPath = join(CACHE_ROOT, preview.cachePath);
-    await unlink(absPath).catch(() => {});
-    await unlink(absPath.replace(".webp", ".failed")).catch(() => {});
-  }
-
-  // Delete stale VideoCache records for old sourceVersion — NVMe cleanup handled by GC phase
-  if (oldSourceVersion) {
-    await prisma.videoCache.deleteMany({
-      where: { fileNodeId, sourceVersion: oldSourceVersion },
-    }).catch(() => {});
-  }
+async function invalidateFileNodeCache(fileNodeId: string) {
+  // Only clear the link — don't touch ContentIdentity or its derived media
+  await prisma.fileNode.update({
+    where: { id: fileNodeId },
+    data: {
+      contentIdentityId: null,
+      healthStatus: "HEALTHY",
+      healthError: null,
+      healthCheckedVersion: null,
+    },
+  }).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -226,12 +348,11 @@ async function invalidateDerivedMedia(fileNodeId: string, oldSourceVersion: stri
 
 async function processFile(
   absolutePath: string,
-  fileStatObj?: Awaited<ReturnType<typeof stat>>
+  fileStatObj?: Stats
 ) {
   const name = basename(absolutePath);
   if (IGNORED_DIRS.has(name) || name.startsWith("._")) return;
   const relativePath = relative(MEDIA_ROOT, absolutePath);
-  if (relativePath.includes("/.Trash") || relativePath.includes("/$RECYCLE.BIN")) return;
 
   try {
     const fileStat = fileStatObj ?? await stat(absolutePath);
@@ -240,56 +361,51 @@ async function processFile(
     const modifiedAt = fileStat.mtime;
     const sourceVersion = computeSourceVersion(fileStat.size, fileStat.mtimeMs);
 
-    const node = await prisma.fileNode.upsert({
-      where: { relativePath },
-      update: {
-        name,
-        mimeType: mimeType ?? undefined,
-        size: BigInt(fileStat.size),
-        modifiedAt,
-        sourceVersion,
-        isVisible: true,
-      },
-      create: {
-        relativePath,
-        name,
-        type: "FILE",
-        mimeType: mimeType ?? undefined,
-        size: BigInt(fileStat.size),
-        modifiedAt,
-        sourceVersion,
-        isVisible: true,
-      },
+    // Use findFirst + create/update since relativePath is not @unique
+    const existing = await prisma.fileNode.findFirst({
+      where: { relativePath, inTrash: false },
     });
 
-    if (IMAGE_EXTENSIONS.has(ext)) {
-      const thumbPath = await generateThumbnail(absolutePath, node.id, sourceVersion);
-      const previewPath = await generatePreview(absolutePath, node.id, sourceVersion);
-      if (thumbPath) {
-        await prisma.thumbnail.upsert({
-          where: { fileNodeId: node.id },
-          update: { cachePath: thumbPath, sourceVersion },
-          create: { fileNodeId: node.id, cachePath: thumbPath, width: 320, height: 320, sourceVersion },
+    const node = existing
+      ? await prisma.fileNode.update({
+          where: { id: existing.id },
+          data: {
+            name,
+            mimeType: mimeType ?? undefined,
+            size: BigInt(fileStat.size),
+            modifiedAt,
+            sourceVersion,
+            isVisible: true,
+            inTrash: false,
+          },
+        })
+      : await prisma.fileNode.create({
+          data: {
+            relativePath,
+            name,
+            type: "FILE",
+            mimeType: mimeType ?? undefined,
+            size: BigInt(fileStat.size),
+            modifiedAt,
+            sourceVersion,
+            isVisible: true,
+            inTrash: false,
+          },
         });
-      }
-      if (previewPath) {
-        const existing = await prisma.preview.findUnique({ where: { fileNodeId: node.id } });
-        const width = existing?.width ?? (await sharp(absolutePath).metadata().catch(() => ({}))).width ?? 0;
-        const height = existing?.height ?? (await sharp(absolutePath).metadata().catch(() => ({}))).height ?? 0;
-        await prisma.preview.upsert({
-          where: { fileNodeId: node.id },
-          update: { cachePath: previewPath, sourceVersion },
-          create: { fileNodeId: node.id, cachePath: previewPath, width, height, sourceVersion },
-        });
-      }
-    } else if (VIDEO_EXTENSIONS.has(ext)) {
-      const posterPath = await generateVideoThumbnail(absolutePath, node.id, sourceVersion);
-      if (posterPath) {
-        await prisma.thumbnail.upsert({
-          where: { fileNodeId: node.id },
-          update: { cachePath: posterPath, sourceVersion },
-          create: { fileNodeId: node.id, cachePath: posterPath, width: 320, height: 320, sourceVersion },
-        });
+
+    const isImage = IMAGE_EXTENSIONS.has(ext);
+    const isVideo = VIDEO_EXTENSIONS.has(ext);
+
+    if (isImage || isVideo) {
+      // Lazy: resolve ContentIdentity only now that we're about to read the file
+      const contentIdentityId = await resolveContentIdentity(absolutePath, fileStat.size, node.id);
+      if (!contentIdentityId) return;
+
+      if (isImage) {
+        await generateThumbnail(absolutePath, contentIdentityId, node.id);
+        await generatePreview(absolutePath, contentIdentityId, node.id);
+      } else {
+        await generateVideoThumbnail(absolutePath, contentIdentityId, node.id);
       }
     }
   } catch (err) {
@@ -305,11 +421,17 @@ async function processDirectory(absolutePath: string) {
 
   try {
     const dirStat = await stat(absolutePath);
-    await prisma.fileNode.upsert({
-      where: { relativePath },
-      update: { name, isVisible: true, modifiedAt: dirStat.mtime },
-      create: { relativePath, name, type: "DIRECTORY", isVisible: true, modifiedAt: dirStat.mtime },
-    });
+    const existing = await prisma.fileNode.findFirst({ where: { relativePath } });
+    if (existing) {
+      await prisma.fileNode.update({
+        where: { id: existing.id },
+        data: { name, isVisible: true, modifiedAt: dirStat.mtime },
+      });
+    } else {
+      await prisma.fileNode.create({
+        data: { relativePath, name, type: "DIRECTORY", isVisible: true, modifiedAt: dirStat.mtime },
+      });
+    }
   } catch (err) {
     log("WARN", `Failed to process dir: ${relativePath}`, { error: String(err) });
   }
@@ -379,9 +501,13 @@ async function scanDirectory(dirPath: string, jobId: string): Promise<RescanStat
         const ext = extname(entry.name).toLowerCase();
         const newSourceVersion = computeSourceVersion(fileStat.size, fileStat.mtimeMs);
 
-        const existing = await prisma.fileNode.findUnique({
-          where: { relativePath: relPath },
-          include: { thumbnail: true, preview: true },
+        const existing = await prisma.fileNode.findFirst({
+          where: { relativePath: relPath, inTrash: false },
+          include: {
+            contentIdentity: {
+              include: { thumbnail: true, preview: true },
+            },
+          },
         });
 
         stats.filesChecked++;
@@ -392,10 +518,8 @@ async function scanDirectory(dirPath: string, jobId: string): Promise<RescanStat
           existing.modifiedAt?.getTime() === fileStat.mtime.getTime();
 
         if (unchanged && existing) {
-          // ── File unchanged ── check that derived media is still valid ──
-          const currentVersion = existing.sourceVersion ?? newSourceVersion;
-
-          // Backfill sourceVersion if it was NULL (e.g. pre-migration records)
+          // ── File unchanged ── verify derived media is still present ──
+          // Backfill sourceVersion if NULL (pre-migration records)
           if (!existing.sourceVersion) {
             await prisma.fileNode.update({
               where: { id: existing.id },
@@ -403,88 +527,86 @@ async function scanDirectory(dirPath: string, jobId: string): Promise<RescanStat
             }).catch(() => {});
           }
 
-          // THUMBNAIL check
-          const thumbValid =
-            existing.thumbnail &&
-            existing.thumbnail.sourceVersion === currentVersion &&
-            await access(join(CACHE_ROOT, existing.thumbnail.cachePath), constants.R_OK).then(() => true).catch(() => false);
+          const ci = existing.contentIdentity;
 
-          if (thumbValid) {
-            stats.thumbsReused++;
-          } else if (IMAGE_EXTENSIONS.has(ext) || VIDEO_EXTENSIONS.has(ext)) {
-            // Invalidate stale record before regenerating
-            if (existing.thumbnail && existing.thumbnail.sourceVersion !== currentVersion) {
-              await invalidateDerivedMedia(existing.id, null); // only thumb/preview, not video
+          if (ci) {
+            // Thumbnail check
+            if (ci.thumbnail) {
+              const onDisk = await access(join(CACHE_ROOT, ci.thumbnail.cachePath), constants.R_OK)
+                .then(() => true).catch(() => false);
+              if (onDisk && ci.thumbnail.profileVersion === THUMB_PROFILE) {
+                stats.thumbsReused++;
+              } else if (IMAGE_EXTENSIONS.has(ext) || VIDEO_EXTENSIONS.has(ext)) {
+                const path = isImage(ext)
+                  ? await generateThumbnail(absolutePath, ci.id, existing.id, true)
+                  : await generateVideoThumbnail(absolutePath, ci.id, existing.id, true);
+                path ? stats.thumbsRegenerated++ : stats.thumbsMissing++;
+              }
+            } else if (IMAGE_EXTENSIONS.has(ext) || VIDEO_EXTENSIONS.has(ext)) {
+              // No thumbnail yet — generate
+              const path = IMAGE_EXTENSIONS.has(ext)
+                ? await generateThumbnail(absolutePath, ci.id, existing.id)
+                : await generateVideoThumbnail(absolutePath, ci.id, existing.id);
+              path ? stats.thumbsRegenerated++ : stats.thumbsMissing++;
             }
-            const generator = IMAGE_EXTENSIONS.has(ext)
-              ? () => generateThumbnail(absolutePath, existing.id, currentVersion, true)
-              : () => generateVideoThumbnail(absolutePath, existing.id, currentVersion, true);
-            const thumbPath = await generator();
-            if (thumbPath) {
-              await prisma.thumbnail.upsert({
-                where: { fileNodeId: existing.id },
-                update: { cachePath: thumbPath, sourceVersion: currentVersion },
-                create: { fileNodeId: existing.id, cachePath: thumbPath, width: 320, height: 320, sourceVersion: currentVersion },
-              }).catch(() => {});
-              stats.thumbsRegenerated++;
-            } else {
-              stats.thumbsMissing++;
-            }
-          }
 
-          // PREVIEW check (images only)
-          if (IMAGE_EXTENSIONS.has(ext)) {
-            const previewValid =
-              existing.preview &&
-              existing.preview.sourceVersion === currentVersion &&
-              await access(join(CACHE_ROOT, existing.preview.cachePath), constants.R_OK).then(() => true).catch(() => false);
-
-            if (previewValid) {
-              stats.previewsReused++;
-            } else {
-              const previewPath = await generatePreview(absolutePath, existing.id, currentVersion, true);
-              if (previewPath) {
-                const imgMeta = await sharp(absolutePath).metadata().catch(() => ({ width: 0, height: 0 }));
-                await prisma.preview.upsert({
-                  where: { fileNodeId: existing.id },
-                  update: { cachePath: previewPath, sourceVersion: currentVersion },
-                  create: { fileNodeId: existing.id, cachePath: previewPath, width: imgMeta.width ?? 0, height: imgMeta.height ?? 0, sourceVersion: currentVersion },
-                }).catch(() => {});
-                stats.previewsRegenerated++;
+            // Preview check (images only)
+            if (IMAGE_EXTENSIONS.has(ext)) {
+              if (ci.preview) {
+                const onDisk = await access(join(CACHE_ROOT, ci.preview.cachePath), constants.R_OK)
+                  .then(() => true).catch(() => false);
+                if (onDisk && ci.preview.profileVersion === PREVIEW_PROFILE) {
+                  stats.previewsReused++;
+                } else {
+                  const path = await generatePreview(absolutePath, ci.id, existing.id, true);
+                  path ? stats.previewsRegenerated++ : stats.previewsMissing++;
+                }
               } else {
-                stats.previewsMissing++;
+                const path = await generatePreview(absolutePath, ci.id, existing.id);
+                path ? stats.previewsRegenerated++ : stats.previewsMissing++;
               }
             }
-          }
 
-          // VIDEOCACHE check
-          if (VIDEO_EXTENSIONS.has(ext)) {
-            const videoCache = await prisma.videoCache.findFirst({
-              where: { fileNodeId: existing.id, sourceVersion: currentVersion },
-            });
-            if (videoCache) {
-              const cacheDirAbs = join(CACHE_ROOT, videoCache.cacheDir);
-              const cacheExists = await access(cacheDirAbs, constants.R_OK).then(() => true).catch(() => false);
-              if (cacheExists) {
-                stats.videoCachesValid++;
+            // VideoCache check
+            if (VIDEO_EXTENSIONS.has(ext)) {
+              const videoCache = await prisma.videoCache.findFirst({
+                where: { contentIdentityId: ci.id },
+              });
+              if (videoCache) {
+                const cacheDirAbs = join(CACHE_ROOT, videoCache.cacheDir);
+                const cacheExists = await access(cacheDirAbs, constants.R_OK).then(() => true).catch(() => false);
+                if (cacheExists) {
+                  stats.videoCachesValid++;
+                } else {
+                  await prisma.videoCache.delete({ where: { id: videoCache.id } }).catch(() => {});
+                  stats.videoCachesInvalidated++;
+                }
+              }
+            }
+          } else if (IMAGE_EXTENSIONS.has(ext) || VIDEO_EXTENSIONS.has(ext)) {
+            // Unchanged file, no ContentIdentity yet — resolve lazily now
+            const ciId = await resolveContentIdentity(absolutePath, fileStat.size, existing.id);
+            if (ciId) {
+              if (IMAGE_EXTENSIONS.has(ext)) {
+                const tp = await generateThumbnail(absolutePath, ciId, existing.id);
+                const pp = await generatePreview(absolutePath, ciId, existing.id);
+                tp ? stats.thumbsRegenerated++ : stats.thumbsMissing++;
+                pp ? stats.previewsRegenerated++ : stats.previewsMissing++;
               } else {
-                // Cache dir missing — delete stale DB record; generation remains lazy
-                await prisma.videoCache.delete({ where: { id: videoCache.id } }).catch(() => {});
-                stats.videoCachesInvalidated++;
+                const tp = await generateVideoThumbnail(absolutePath, ciId, existing.id);
+                tp ? stats.thumbsRegenerated++ : stats.thumbsMissing++;
               }
             }
           }
         } else {
-          // ── New or changed file ── invalidate old derived media, re-index ──
+          // ── New or changed file ── invalidate old ContentIdentity link, re-index ──
           if (existing) {
             stats.filesChanged++;
-            const oldVersion = existing.sourceVersion;
-            await invalidateDerivedMedia(existing.id, oldVersion);
+            await invalidateFileNodeCache(existing.id);
           } else {
             stats.filesAdded++;
           }
           await processFile(absolutePath, fileStat);
-          // Count newly generated thumb/preview as regenerated
           if (IMAGE_EXTENSIONS.has(ext)) { stats.thumbsRegenerated++; stats.previewsRegenerated++; }
           else if (VIDEO_EXTENSIONS.has(ext)) { stats.thumbsRegenerated++; }
         }
@@ -511,8 +633,13 @@ async function scanDirectory(dirPath: string, jobId: string): Promise<RescanStat
   return stats;
 }
 
+function isImage(ext: string): boolean {
+  return IMAGE_EXTENSIONS.has(ext);
+}
+
 // ---------------------------------------------------------------------------
 // Prune deleted FileNodes (with T7 mount sanity check)
+// Skips inTrash nodes — they physically live in .LoomTrash, not relativePath
 // ---------------------------------------------------------------------------
 
 async function pruneDeletedFiles(): Promise<number> {
@@ -525,14 +652,18 @@ async function pruneDeletedFiles(): Promise<number> {
   }
 
   // Count accessible files to detect suspiciously low counts (possible mount failure)
-  const indexedCount = await prisma.fileNode.count({ where: { type: "FILE" } });
+  const indexedCount = await prisma.fileNode.count({ where: { type: "FILE", inTrash: false } });
   const accessibleCount = await countFiles(MEDIA_ROOT);
   if (indexedCount > 50 && accessibleCount < indexedCount * 0.1) {
     log("WARN", `Suspiciously low file count (${accessibleCount} vs ${indexedCount} indexed) — skipping prune (possible mount issue)`);
     return 0;
   }
 
-  const allNodes = await prisma.fileNode.findMany({ select: { id: true, relativePath: true } });
+  // Only prune non-trashed nodes
+  const allNodes = await prisma.fileNode.findMany({
+    where: { inTrash: false },
+    select: { id: true, relativePath: true },
+  });
   let pruned = 0;
   for (const node of allNodes) {
     try { await access(join(MEDIA_ROOT, node.relativePath), constants.F_OK); }
@@ -546,13 +677,48 @@ async function pruneDeletedFiles(): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------
-// Orphan GC: clean up NVMe cache files that have no valid DB record
+// Trash GC: Permanently delete expired trash items
+// ---------------------------------------------------------------------------
+
+async function expireTrashItems(): Promise<number> {
+  log("INFO", "Starting Trash Expiration...");
+  const expiredItems = await prisma.trashItem.findMany({
+    where: { expiresAt: { lt: new Date() } },
+    include: { fileNode: true },
+  });
+
+  let deleted = 0;
+  for (const item of expiredItems) {
+    const trashAbsPath = join(MEDIA_ROOT, ".LoomTrash", item.trashPath);
+    try {
+      await rm(trashAbsPath, { recursive: true, force: true });
+      await prisma.fileNode.delete({ where: { id: item.fileNodeId } });
+      await prisma.auditLog.create({
+        data: {
+          action: "EXPIRE_TRASH",
+          details: { originalPath: item.originalPath, trashPath: item.trashPath },
+        },
+      });
+      deleted++;
+    } catch (err: any) {
+      log("ERROR", `Failed to expire trash item ${item.trashPath}`, { error: err.message });
+    }
+  }
+
+  log("INFO", "Trash Expiration complete", { deleted });
+  return deleted;
+}
+
+// ---------------------------------------------------------------------------
+// Orphan GC: clean up NVMe cache files with no valid DB record
+// References ContentIdentity, not FileNode.
+// A ContentIdentity is still needed if ANY non-deleted FileNode references it.
 // ---------------------------------------------------------------------------
 
 async function runOrphanGC(): Promise<{ thumbsDeleted: number; previewsDeleted: number; videoCachesDeleted: number }> {
   const result = { thumbsDeleted: 0, previewsDeleted: 0, videoCachesDeleted: 0 };
 
-  // Build sets of valid cache paths
+  // Build sets of valid cache paths from DB
   const validThumbs = new Set<string>();
   const validPreviews = new Set<string>();
   const validVideoCacheDirs = new Set<string>();
@@ -572,19 +738,19 @@ async function runOrphanGC(): Promise<{ thumbsDeleted: number; previewsDeleted: 
     for (const f of thumbFiles) {
       const abs = join(THUMB_DIR, f);
       if (!validThumbs.has(abs) && !abs.endsWith(".failed")) {
-        await unlink(abs).catch(() => {});
+        await import("fs/promises").then(m => m.unlink(abs)).catch(() => {});
         result.thumbsDeleted++;
       }
     }
   } catch {}
 
-  // Clean orphaned previews
+  // Clean orphaned previews (video posters live here too)
   try {
     const previewFiles = await readdir(PREVIEW_DIR);
     for (const f of previewFiles) {
       const abs = join(PREVIEW_DIR, f);
       if (!validPreviews.has(abs) && !validThumbs.has(abs) && !abs.endsWith(".failed")) {
-        await unlink(abs).catch(() => {});
+        await import("fs/promises").then(m => m.unlink(abs)).catch(() => {});
         result.previewsDeleted++;
       }
     }
@@ -593,23 +759,37 @@ async function runOrphanGC(): Promise<{ thumbsDeleted: number; previewsDeleted: 
   // Clean orphaned video cache directories
   try {
     await ensureDir(VIDEO_CACHE_DIR);
-    const nodeIds = await readdir(VIDEO_CACHE_DIR);
-    for (const nodeId of nodeIds) {
-      const nodeDir = join(VIDEO_CACHE_DIR, nodeId);
-      const versions = await readdir(nodeDir).catch(() => [] as string[]);
+    const contentIds = await readdir(VIDEO_CACHE_DIR);
+    for (const contentId of contentIds) {
+      const contentDir = join(VIDEO_CACHE_DIR, contentId);
+      const versions = await readdir(contentDir).catch(() => [] as string[]);
       for (const version of versions) {
-        const versionDir = join(nodeDir, version);
-        const cacheRelDir = `videos/${nodeId}/${version}`;
+        const versionDir = join(contentDir, version);
+        const cacheRelDir = `videos/${contentId}/${version}`;
         if (!validVideoCacheDirs.has(join(CACHE_ROOT, cacheRelDir))) {
           await rm(versionDir, { recursive: true, force: true }).catch(() => {});
           result.videoCachesDeleted++;
         }
       }
-      // If nodeId dir is now empty, remove it
-      const remaining = await readdir(nodeDir).catch(() => ["placeholder"]);
-      if (remaining.length === 0) await rm(nodeDir, { recursive: true, force: true }).catch(() => {});
+      const remaining = await readdir(contentDir).catch(() => ["placeholder"]);
+      if (remaining.length === 0) await rm(contentDir, { recursive: true, force: true }).catch(() => {});
     }
   } catch {}
+
+  // Also prune ContentIdentity records no longer referenced by any FileNode
+  // This must run AFTER pruneDeletedFiles() to avoid removing identities of just-deleted nodes
+  const orphanedIdentities = await prisma.contentIdentity.findMany({
+    where: { nodes: { none: {} } },
+    select: { id: true },
+  });
+  for (const ci of orphanedIdentities) {
+    // Cascading delete removes Thumbnail/Preview/VideoCache automatically
+    await prisma.contentIdentity.delete({ where: { id: ci.id } }).catch(() => {});
+  }
+
+  if (orphanedIdentities.length > 0) {
+    log("INFO", `Pruned ${orphanedIdentities.length} orphaned ContentIdentity records`);
+  }
 
   return result;
 }
@@ -635,7 +815,10 @@ async function runFullRescan(jobId: string) {
     // Phase 2: Prune deleted FileNodes (with T7 safety check)
     stats.filesRemoved = await pruneDeletedFiles();
 
-    // Phase 3: Orphan GC — clean stale/orphaned NVMe cache files
+    // Phase 3: Expire old Trash items before Orphan GC
+    const trashExpired = await expireTrashItems();
+
+    // Phase 4: Orphan GC — clean stale/orphaned NVMe cache files
     const gcResult = await runOrphanGC();
     stats.videoCachesOrphaned = gcResult.videoCachesDeleted;
 
@@ -649,6 +832,7 @@ async function runFullRescan(jobId: string) {
       videoCaches: { valid: stats.videoCachesValid, invalidated: stats.videoCachesInvalidated, orphaned: stats.videoCachesOrphaned },
       orphanedThumbs: gcResult.thumbsDeleted,
       orphanedPreviews: gcResult.previewsDeleted,
+      trashExpired,
     });
 
     await prisma.scanJob.update({

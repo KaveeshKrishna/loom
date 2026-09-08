@@ -2,7 +2,7 @@
  * HLS Manager — Region-Based, Demand-Driven HLS Generation
  *
  * Architecture:
- *  - One FFmpeg process per (fileNodeId, sourceVersion, regionStartSegment).
+ *  - One FFmpeg process per (contentIdentityId, profileVersion, regionStartSegment).
  *  - Multiple clients seeking the same region share one FFmpeg process.
  *  - Activity-based lifecycle: FFmpeg is terminated after 30s of no segment/manifest requests.
  *  - Atomic segment finalization: segments written to .tmp then renamed.
@@ -36,8 +36,8 @@ const SEGMENT_POLL_MS = 200;
 // ---------------------------------------------------------------------------
 
 interface GenerationJob {
-  fileNodeId: string;
-  sourceVersion: string;
+  contentIdentityId: string;
+  profileVersion: string;
   regionStart: number;        // segment index this job started from
   process: ChildProcess | null;
   lastActivityAt: number;
@@ -47,23 +47,23 @@ interface GenerationJob {
   _resolve: () => void;
 }
 
-// Key: `${fileNodeId}/${sourceVersion}/${regionStart}`
+// Key: `${contentIdentityId}/${profileVersion}/${regionStart}`
 const activeJobs = new Map<string, GenerationJob>();
 
 // ---------------------------------------------------------------------------
 // Path helpers
 // ---------------------------------------------------------------------------
 
-function cacheDir(fileNodeId: string, sourceVersion: string): string {
-  return join(VIDEO_CACHE_DIR, fileNodeId, sourceVersion);
+function cacheDir(contentIdentityId: string, profileVersion: string): string {
+  return join(VIDEO_CACHE_DIR, contentIdentityId, profileVersion);
 }
 
 function segmentPath(dir: string, index: number): string {
   return join(dir, `segment_${String(index).padStart(3, "0")}.m4s`);
 }
 
-function jobKey(fileNodeId: string, sourceVersion: string, regionStart: number): string {
-  return `${fileNodeId}/${sourceVersion}/${regionStart}`;
+function jobKey(contentIdentityId: string, profileVersion: string, regionStart: number): string {
+  return `${contentIdentityId}/${profileVersion}/${regionStart}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,8 +86,8 @@ async function isSegmentValid(dir: string, index: number): Promise<boolean> {
 // which segments are already finalized on disk.
 // ---------------------------------------------------------------------------
 
-export async function getCompletedSegments(fileNodeId: string, sourceVersion: string): Promise<Set<number>> {
-  const dir = cacheDir(fileNodeId, sourceVersion);
+export async function getCompletedSegments(contentIdentityId: string, profileVersion: string): Promise<Set<number>> {
+  const dir = cacheDir(contentIdentityId, profileVersion);
   const result = new Set<number>();
   try {
     const files = await readdir(dir);
@@ -108,10 +108,10 @@ export async function getCompletedSegments(fileNodeId: string, sourceVersion: st
 // Activity tracking
 // ---------------------------------------------------------------------------
 
-export function recordActivity(fileNodeId: string, sourceVersion: string): void {
+export function recordActivity(contentIdentityId: string, profileVersion: string): void {
   // Update lastActivityAt on any active job for this file
   for (const [, job] of activeJobs) {
-    if (job.fileNodeId === fileNodeId && job.sourceVersion === sourceVersion) {
+    if (job.contentIdentityId === contentIdentityId && job.profileVersion === profileVersion) {
       job.lastActivityAt = Date.now();
       // Cancel any pending grace timer
       if (job.graceTimer) {
@@ -163,7 +163,7 @@ async function spawnFfmpeg(
     join(dir, "_generation.m3u8"),
   ];
 
-  console.log(`[HLS] Spawning FFmpeg: ${job.fileNodeId} region=${startSegment} src=${absoluteSource}`);
+  console.log(`[HLS] Spawning FFmpeg: ${job.contentIdentityId} region=${startSegment} src=${absoluteSource}`);
   console.log(`[HLS] FFmpeg args: ${args.join(" ")}`);
 
   const ffmpeg = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -183,9 +183,9 @@ async function spawnFfmpeg(
   return new Promise((resolve) => {
     ffmpeg.on("close", async (code) => {
       if (code === 0) {
-        console.log(`[HLS] Generation complete: ${job.fileNodeId} region=${startSegment}`);
+        console.log(`[HLS] Generation complete: ${job.contentIdentityId} region=${startSegment}`);
       } else {
-        console.warn(`[HLS] FFmpeg exited with code ${code}: ${job.fileNodeId} region=${startSegment}`);
+        console.warn(`[HLS] FFmpeg exited with code ${code}: ${job.contentIdentityId} region=${startSegment}`);
       }
       job.process = null;
       job._resolve();
@@ -213,44 +213,44 @@ async function spawnFfmpeg(
  * only one FFmpeg process is spawned.
  */
 export async function ensureGeneration(
-  fileNodeId: string,
-  sourceVersion: string,
+  contentIdentityId: string,
+  profileVersion: string,
   segmentIndex: number,
   absoluteSource: string,
   durationSeconds: number
 ): Promise<void> {
-  const dir = cacheDir(fileNodeId, sourceVersion);
-  console.log(`[HLS] ensureGeneration: ${fileNodeId} seg=${segmentIndex} dir=${dir}`);
+  const dir = cacheDir(contentIdentityId, profileVersion);
+  console.log(`[HLS] ensureGeneration: ${contentIdentityId} seg=${segmentIndex} dir=${dir}`);
   await mkdir(dir, { recursive: true });
 
   // Check if this specific segment is already complete
   if (await isSegmentValid(dir, segmentIndex)) {
     console.log(`[HLS] Segment ${segmentIndex} already valid on disk`);
-    recordActivity(fileNodeId, sourceVersion);
+    recordActivity(contentIdentityId, profileVersion);
     return;
   }
 
   // Find an existing job that will eventually produce this segment
   for (const [key, job] of activeJobs) {
     if (
-      job.fileNodeId === fileNodeId &&
-      job.sourceVersion === sourceVersion &&
+      job.contentIdentityId === contentIdentityId &&
+      job.profileVersion === profileVersion &&
       job.regionStart <= segmentIndex &&
       job.process !== null // still running
     ) {
       console.log(`[HLS] Joining existing job ${key} for seg=${segmentIndex}`);
-      recordActivity(fileNodeId, sourceVersion);
+      recordActivity(contentIdentityId, profileVersion);
       return; // join existing job — segment will appear eventually
     }
   }
 
   // No suitable active job — start a new one from this segment
-  const key = jobKey(fileNodeId, sourceVersion, segmentIndex);
+  const key = jobKey(contentIdentityId, profileVersion, segmentIndex);
 
   // Double-check: another concurrent caller may have just started one
   if (activeJobs.has(key)) {
     console.log(`[HLS] Race: job ${key} already registered`);
-    recordActivity(fileNodeId, sourceVersion);
+    recordActivity(contentIdentityId, profileVersion);
     return;
   }
 
@@ -260,8 +260,8 @@ export async function ensureGeneration(
   const done = new Promise<void>((res) => { _resolve = res; });
 
   const job: GenerationJob = {
-    fileNodeId,
-    sourceVersion,
+    contentIdentityId,
+    profileVersion,
     regionStart: segmentIndex,
     process: null,
     lastActivityAt: Date.now(),
@@ -288,7 +288,7 @@ export async function ensureGeneration(
 setInterval(() => {
   for (const [, job] of activeJobs) {
     if (Date.now() - job.lastActivityAt >= IDLE_GRACE_MS && job.process) {
-      console.log(`[HLS] Idle timeout — sending SIGTERM: ${job.fileNodeId}`);
+      console.log(`[HLS] Idle timeout — sending SIGTERM: ${job.contentIdentityId}`);
       job.process.kill("SIGTERM");
     }
   }
@@ -303,11 +303,11 @@ setInterval(() => {
  * Returns true if found within SEGMENT_WAIT_MS, false otherwise (caller should 503).
  */
 export async function waitForSegment(
-  fileNodeId: string,
-  sourceVersion: string,
+  contentIdentityId: string,
+  profileVersion: string,
   segmentIndex: number
 ): Promise<boolean> {
-  const dir = cacheDir(fileNodeId, sourceVersion);
+  const dir = cacheDir(contentIdentityId, profileVersion);
   const deadline = Date.now() + SEGMENT_WAIT_MS;
 
   while (Date.now() < deadline) {
@@ -329,8 +329,8 @@ export async function waitForSegment(
  * Segments that don't yet exist will return 503 when requested — hls.js retries.
  */
 export function synthesizeManifest(
-  fileNodeId: string,
-  sourceVersion: string,
+  contentIdentityId: string,
+  profileVersion: string,
   durationSeconds: number
 ): string {
   const totalSegments = Math.ceil(durationSeconds / SEGMENT_DURATION);
@@ -361,13 +361,13 @@ export function synthesizeManifest(
 // ---------------------------------------------------------------------------
 
 export async function getOrProbeDuration(
-  fileNodeId: string,
-  sourceVersion: string,
+  contentIdentityId: string,
+  profileVersion: string,
   absoluteSource: string
 ): Promise<number | null> {
   // Check DB first
   const cached = await prisma.videoCache.findUnique({
-    where: { fileNodeId_sourceVersion: { fileNodeId, sourceVersion } },
+    where: { contentIdentityId_profileVersion: { contentIdentityId, profileVersion } },
     select: { durationSeconds: true },
   });
   if (cached?.durationSeconds) return cached.durationSeconds;
@@ -378,12 +378,12 @@ export async function getOrProbeDuration(
 
   // Upsert VideoCache with duration
   await prisma.videoCache.upsert({
-    where: { fileNodeId_sourceVersion: { fileNodeId, sourceVersion } },
+    where: { contentIdentityId_profileVersion: { contentIdentityId, profileVersion } },
     update: { durationSeconds: probe.durationSeconds, lastAccessedAt: new Date() },
     create: {
-      fileNodeId,
-      sourceVersion,
-      cacheDir: `videos/${fileNodeId}/${sourceVersion}`,
+      contentIdentityId,
+      profileVersion,
+      cacheDir: `videos/${contentIdentityId}/${profileVersion}`,
       durationSeconds: probe.durationSeconds,
     },
   }).catch(() => {});
@@ -395,9 +395,9 @@ export async function getOrProbeDuration(
 // Update lastAccessedAt on VideoCache DB record
 // ---------------------------------------------------------------------------
 
-export async function touchVideoCache(fileNodeId: string, sourceVersion: string): Promise<void> {
+export async function touchVideoCache(contentIdentityId: string, profileVersion: string): Promise<void> {
   await prisma.videoCache.updateMany({
-    where: { fileNodeId, sourceVersion },
+    where: { contentIdentityId, profileVersion },
     data: { lastAccessedAt: new Date() },
   }).catch(() => {});
 }
@@ -406,14 +406,14 @@ export async function touchVideoCache(fileNodeId: string, sourceVersion: string)
 // Get init.mp4 path
 // ---------------------------------------------------------------------------
 
-export function getInitSegmentPath(fileNodeId: string, sourceVersion: string): string {
-  return join(cacheDir(fileNodeId, sourceVersion), "init.mp4");
+export function getInitSegmentPath(contentIdentityId: string, profileVersion: string): string {
+  return join(cacheDir(contentIdentityId, profileVersion), "init.mp4");
 }
 
-export function getSegmentPath(fileNodeId: string, sourceVersion: string, index: number): string {
-  return segmentPath(cacheDir(fileNodeId, sourceVersion), index);
+export function getSegmentPath(contentIdentityId: string, profileVersion: string, index: number): string {
+  return segmentPath(cacheDir(contentIdentityId, profileVersion), index);
 }
 
-export function getCacheDir(fileNodeId: string, sourceVersion: string): string {
-  return cacheDir(fileNodeId, sourceVersion);
+export function getCacheDir(contentIdentityId: string, profileVersion: string): string {
+  return cacheDir(contentIdentityId, profileVersion);
 }

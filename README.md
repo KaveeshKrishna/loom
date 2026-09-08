@@ -1,151 +1,97 @@
 # Loom
 
-> **Weaving your digital life together.**
+> Weaving your digital life together.
 
-Loom is a production-quality, self-hosted personal storage application for the `kkp-node` home VPS. It is a premium, permission-aware file explorer that sits on top of the Samsung T7 filesystem, preserving the user's folder organization.
+Loom is a self-hosted, permission-aware file manager for your own server or NAS. Point it at a directory of files you already own — photos, videos, documents, whatever — and get a fast, modern web UI to browse, search, organize, and stream them from anywhere, without ever losing control of the underlying filesystem.
 
----
+It is built around one rule: **your files stay exactly where they are, organized exactly how you left them.** Loom is a window onto your filesystem, not a walled garden that reimports and reorganizes it.
 
-## Architecture
+<!-- Screenshot placeholders — replace with real screenshots before publishing.
+![Loom file browser](docs/images/screenshot-files.png)
+![Loom media viewer](docs/images/screenshot-viewer.png)
+-->
 
-| Component | Technology | Port |
-|---|---|---|
-| Web App | Next.js 15 (App Router) | 127.0.0.1:8085 |
-| Database | PostgreSQL 17 (Docker) | internal |
-| Scanner | Node.js (Docker, event-driven + reconciliation) | — |
+## Features
 
-**Storage layout:**
+- **Fast, responsive file browser** — grid and list views, drag-and-drop upload, cut/copy/paste, rename, folder creation, right-click context menus, and long-press support on touch devices.
+- **Smart media viewer** — full-screen photo/video viewer with a sibling timeline, EXIF-aware sorting, and keyboard navigation.
+- **Region-based HLS video streaming** — natively-compatible videos stream directly; incompatible formats (HEVC, MOV, MKV, AVI, etc.) are transcoded on the fly, one requested segment at a time, so playback starts immediately without transcoding the whole file up front.
+- **Content-aware deduplication** — identical files (by content, not just by path) share a single thumbnail/preview/HLS cache, computed lazily only when actually needed — never during a routine scan.
+- **Trash with recovery** — deleted items move to a sandboxed trash for 15 days before permanent removal, with conflict-safe restore.
+- **File health tracking** — corrupt or unsupported media files are flagged and browsable separately, so they don't get mistaken for missing files.
+- **Multi-user with per-path permissions** — an Owner role plus a Family role with path-based access control lists, so you can share the library without sharing everything in it.
+- **Full audit log** — every mutating action (move, delete, restore, rename, permission change) is recorded.
+- **Idle-by-default storage philosophy** — no filesystem watcher, no background hashing, no scan-on-startup. Your disks spin down and stay down between explicit rescans.
 
-| Path | Purpose |
+## Requirements
+
+- A Linux server (or any machine that can run Docker) — self-hosting on a home server/NAS/VPS is the intended use case.
+- [Docker Engine](https://docs.docker.com/engine/install/) and [Docker Compose v2](https://docs.docker.com/compose/install/).
+- A directory of files you want to manage, and some free disk space for a thumbnail/preview/video cache (separate from your files — see [Architecture](docs/ARCHITECTURE.md)).
+- A reverse proxy (Caddy, nginx, Traefik) or tunnel (Cloudflare Tunnel, Tailscale) if you want to reach Loom from outside your local network — see [docs/REVERSE-PROXY.md](docs/REVERSE-PROXY.md).
+
+## Quick Start
+
+```bash
+git clone https://github.com/kaveeshkrishna/loom.git
+cd loom
+./scripts/install.sh
+```
+
+The installer will ask where your files live, generate secrets, build the containers, and start Loom. When it's done, open the printed URL and create your owner account — Loom detects a fresh install automatically and shows a first-run setup page instead of a login form.
+
+Prefer to do it by hand? See [docs/INSTALLATION.md](docs/INSTALLATION.md) for the manual steps and every configuration option.
+
+## Configuration
+
+All configuration lives in a single `.env` file at the repo root (generated from `.env.example` by the installer). Full reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
+| Variable | Purpose |
 |---|---|
-| `/srv/storage/personal/media` | Samsung T7 (original files — source of truth) |
-| `/srv/data/gallery-cache` | NVMe cache (thumbnails, previews, video HLS segments) |
-| PostgreSQL | Metadata only (never original files) |
-
-**Scanner & Cache Architecture:**
-- **Idle by Default:** The scanner intentionally does NOT use a real-time filesystem watcher (like `chokidar`) and does NOT scan automatically on startup. This guarantees the Samsung T7 SSD remains completely idle and is allowed to sleep (via USB runtime power management) when not in use.
-- **Universal Derived Media Reconciliation:** Scans are triggered explicitly by the Owner (via Settings → Scanner → Scan Now). Loom uses a `sourceVersion` (format: `size-mtimeMs`) to uniquely identify files. Rescans seamlessly skip unchanged files, purge stale/orphaned caches, and generate missing media.
-- **Triple Cache Layer:** 
-  - `thumbnails/` (320px) for ultra-fast FileGrid loading.
-  - `previews/` (1920px) for high-resolution full-screen MediaViewer.
-  - `videos/` (fMP4 segments) for region-based HLS streaming (capped at 20 GB).
-
----
-
-## Major Features
-
-- **Region-Based HLS Video Streaming:** Loom intelligently probes video files using `ffprobe`. Natively supported videos (like standard MP4s) are served directly. Incompatible videos (HEVC, MOV, MKV, AVI) are converted to HLS on the fly via FFmpeg. Loom only transcodes the exact requested region of the timeline, deduplicates concurrent requests, and tears down idle FFmpeg processes after 30 seconds to preserve VPS resources.
-- **Responsive Premium UI:** Built with Vanilla CSS and Lucide icons. Features adaptive grid layouts, mobile-first design, fluid breadcrumb navigation, and a global search system.
-- **Advanced Touch Interactions:** Support for native-feeling mobile interactions, including long-press context menus on touch devices and right-click menus on desktop, without triggering OS default behaviors.
-- **Authentication & Security:** Built with `better-auth`. Supports Role-Based Access Control (Owner vs Family) and path-based Access Control Lists (ACL) to restrict visibility of specific private directories. All sensitive actions are recorded in an Audit Log.
-- **TopBar State Management:** Pinned folders, view toggles (Grid/List), and search states are managed globally via `TopBarContext` and persisted across sessions using `localStorage`.
-
----
-
-## First-Time Setup
-
-### 1. Setup Samsung T7 Mount
-Loom requires the Samsung T7 SSD to be permanently mounted at `/srv/storage/personal/media` and the NVMe cache at `/srv/data/gallery-cache`. USB runtime power management (sleep/wake) is handled entirely by the Linux OS.
-
-### 2. Create your `.env` file
-
-```bash
-cp /srv/apps/loom/.env.example /srv/apps/loom/.env
-nano /srv/apps/loom/.env
-```
-
-Fill in all secrets. At minimum:
-- `POSTGRES_PASSWORD` — a strong random password
-- `OWNER_EMAIL` / `OWNER_PASSWORD` — your admin credentials
-- `BETTER_AUTH_SECRET` — a long random string
-- `BETTER_AUTH_URL` — your public domain (e.g. `https://loom.example.com`)
-
-### 3. Build and start
-
-```bash
-cd /srv/apps/loom
-docker compose build
-docker compose up -d
-```
-
-### 4. Push Database Schema & Seed
-
-*(Note: Loom uses `db push` instead of migrations to apply schema changes directly.)*
-
-```bash
-docker compose exec loom-web npx prisma db push --accept-data-loss
-docker compose exec loom-web npm run db:seed
-```
-
-### 5. Configure Caddy
-
-Add to `/etc/caddy/Caddyfile`:
-
-```caddy
-http://loom.example.com {
-    reverse_proxy 127.0.0.1:8085
-}
-```
-
-Reload Caddy:
-```bash
-sudo caddy validate --config /etc/caddy/Caddyfile
-sudo systemctl reload caddy
-```
-
-### 6. Configure Cloudflare
-
-```bash
-cloudflared tunnel route dns your-tunnel loom.example.com
-```
-
----
+| `LOOM_MEDIA_PATH` | Host path to the directory of files Loom manages |
+| `LOOM_CACHE_PATH` | Host path for thumbnails/previews/video cache |
+| `LOOM_BIND` / `LOOM_PORT` | Local bind address/port for the web app |
+| `POSTGRES_PASSWORD` | Database password (auto-generated by the installer) |
+| `BETTER_AUTH_SECRET` | Session signing secret (auto-generated by the installer) |
+| `BETTER_AUTH_URL` / `TRUSTED_ORIGINS` | The public URL you'll access Loom at |
 
 ## Daily Operations
 
-### Check service status
 ```bash
-docker compose ps
-docker compose logs loom-web --tail=50
-docker compose logs loom-scanner --tail=50
+docker compose ps                       # service status
+docker compose logs -f loom-web         # web app logs
+docker compose logs -f loom-scanner     # scanner logs
+./scripts/update.sh                     # pull, rebuild, migrate, restart
+./scripts/backup-db.sh                  # back up the database
+./scripts/uninstall.sh                  # stop and remove containers
 ```
 
-### Trigger a manual scan (from settings dashboard)
-Login as Owner → Settings → Scanner → Scan Now
+Rescans are manual by design (Settings → Scanner → Scan Now, as the Owner) — see [Architecture](docs/ARCHITECTURE.md) for why.
 
-### Rebuild after code changes
-```bash
-cd /srv/apps/loom
-docker compose build
-docker compose up -d
-```
+## Documentation
 
-### Stop
-```bash
-docker compose stop
-```
+- [Installation Guide](docs/INSTALLATION.md)
+- [Configuration Reference](docs/CONFIGURATION.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Reverse Proxy Setup](docs/REVERSE-PROXY.md)
+- [Upgrading](docs/UPGRADING.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
 
-### Remove (preserves database volume)
-```bash
-docker compose down
-```
+## Absolute Rules (Never Violated)
 
----
+These are the design invariants Loom is built around, not aspirations:
 
-## Security Notes
+1. Loom never deletes original files — deletions go through a recoverable Trash.
+2. Loom never moves or renames existing folders automatically.
+3. Loom never reorganizes your filesystem's structure.
+4. Thumbnails, previews, and metadata are written only to the separate cache directory — never onto your original files' filesystem.
+5. Your filesystem is the single source of truth; the database is only an index of it.
+6. The application adapts to your existing folder structure — your files never adapt to the application.
 
-- Loom containers are **not** privileged.
-- The Samsung T7 is permanently mounted by the host OS. Loom has no privileges to mount or unmount it.
-- The Samsung T7 is **never modified** by the application. Thumbnails, previews, and video caches go to `/cache` only.
-- All paths exposed to users are relative (e.g. `Pics/Vacation`) — host paths are never leaked.
+## Contributing
 
----
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Please review [SECURITY.md](SECURITY.md) before reporting a vulnerability.
 
-## Absolute Rules (Never Violate)
+## License
 
-1. Never delete original files.
-2. Never move or rename existing folders automatically.
-3. Never reorganize the Samsung T7 filesystem.
-4. Never write thumbnails, previews, or metadata onto the T7.
-5. The Samsung T7 is the single source of truth.
-6. The application adapts to the filesystem — the filesystem never adapts to the application.
+Loom is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). In short: you're free to use, modify, self-host, and share Loom for any **noncommercial** purpose — personal use, home labs, nonprofits, education, research. Commercial use (offering Loom, or a service built on it, for a fee) requires a separate agreement with the author. This makes Loom **source-available**, not OSI-approved open source — see the license for the exact terms.

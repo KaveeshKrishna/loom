@@ -23,10 +23,11 @@ export async function GET(req: NextRequest) {
   const results = await prisma.fileNode.findMany({
     where: {
       isVisible: true,
+      inTrash: false,
       name: { contains: q, mode: "insensitive" },
       ...(folderPrefix ? { relativePath: { startsWith: folderPrefix } } : {}),
     },
-    include: { thumbnail: true, preview: true },
+    include: { contentIdentity: { include: { thumbnail: true, preview: true } } },
     take: 50,
     orderBy: { updatedAt: "desc" },
   });

@@ -4,8 +4,12 @@ import { useState, useLayoutEffect, type ReactNode } from "react";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { TopBarProvider, useTopBar } from "./TopBarContext";
+import { ClipboardProvider } from "./ClipboardContext";
+import { UploadProvider } from "./UploadContext";
+import { UploadWidget } from "./UploadWidget";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { GlobalSearchResults } from "@/components/files/GlobalSearchResults";
+import { PropertiesDialog } from "@/components/files/PropertiesDialog";
 import { cn } from "@/lib/utils";
 
 interface MainShellProps {
@@ -108,6 +112,8 @@ function MainShellInner({ children, userName, userEmail, isOwner }: MainShellPro
         </main>
       </div>
 
+      <PropertiesDialog />
+      <UploadWidget />
     </div>
   );
 }
@@ -115,7 +121,11 @@ function MainShellInner({ children, userName, userEmail, isOwner }: MainShellPro
 export function MainShell(props: MainShellProps) {
   return (
     <TopBarProvider userEmail={props.userEmail}>
-      <MainShellInner {...props} />
+      <ClipboardProvider>
+        <UploadProvider>
+          <MainShellInner {...props} />
+        </UploadProvider>
+      </ClipboardProvider>
     </TopBarProvider>
   );
 }

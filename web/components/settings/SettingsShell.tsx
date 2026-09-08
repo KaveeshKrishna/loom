@@ -1,24 +1,28 @@
 "use client";
 
-import { useState } from "react";
-import { Users, ShieldCheck, ScanLine, HardDrive, ScrollText } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Users, ShieldCheck, ScanLine, ScrollText } from "lucide-react";
 import { UsersPanel } from "./UsersPanel";
 import { AclPanel } from "./AclPanel";
 import { ScanPanel } from "./ScanPanel";
-import { ArchivePanel } from "./ArchivePanel";
 import { AuditPanel } from "./AuditPanel";
 import { cn } from "@/lib/utils";
+import { useTopBar } from "@/components/layout/TopBarContext";
 
 const tabs = [
   { id: "users", label: "Users", icon: Users },
   { id: "acl", label: "Permissions", icon: ShieldCheck },
   { id: "scan", label: "Scanner", icon: ScanLine },
-  { id: "archive", label: "Archive", icon: HardDrive },
   { id: "audit", label: "Audit Log", icon: ScrollText },
 ];
 
 export function SettingsShell() {
   const [activeTab, setActiveTab] = useState("users");
+  const { setBreadcrumbs } = useTopBar();
+
+  useEffect(() => {
+    setBreadcrumbs([{ label: "Settings", href: "/settings" }]);
+  }, [setBreadcrumbs]);
 
   return (
     <div className="flex flex-col md:flex-row h-full">
@@ -52,7 +56,6 @@ export function SettingsShell() {
         {activeTab === "users" && <UsersPanel />}
         {activeTab === "acl" && <AclPanel />}
         {activeTab === "scan" && <ScanPanel />}
-        {activeTab === "archive" && <ArchivePanel />}
         {activeTab === "audit" && <AuditPanel />}
       </div>
     </div>

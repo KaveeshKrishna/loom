@@ -21,11 +21,9 @@ dist/
 
 # Env files (NEVER COMMIT SECRETS)
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-/host-services/mount-service.env
+.env.*
+!.env.example
+!.env.*.example
 
 # Editor / OS files
 .DS_Store
@@ -47,6 +45,8 @@ Thumbs.db
 /web/.next/
 /web/out/
 /web/build/
+web/next-env.d.ts
+*.tsbuildinfo
 
 # Scanner build output
 /scanner/dist/
@@ -55,7 +55,18 @@ Thumbs.db
 *.db
 *.db-journal
 
-# Python (mount service)
-__pycache__/
-*.py[cod]
-*$py.class
+# Backups / stray edit files
+*.bak
+
+# Local runtime data created by the installer / a local deployment
+/data/
+/backups/
+
+# Deployment-specific infrastructure notes (contains real hostnames, IPs,
+# tunnel IDs, etc. for whichever machine this is deployed on — never shared)
+VPS_CONTEXT.md
+
+# Agent tooling artifacts — local to a given editor/assistant setup
+.agents/
+.claude/
+CLAUDE.local.md

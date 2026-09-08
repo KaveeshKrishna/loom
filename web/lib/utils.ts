@@ -70,17 +70,26 @@ export function sanitizePath(raw: string): string {
 }
 
 /**
-
-/**
- * Serialize a FileNode (or array thereof) to be JSON-safe.
- * Converts BigInt size to a string so NextResponse.json() doesn't throw.
+ * Deep-serialize a value to be JSON-safe.
+ * Converts ALL BigInt fields (at any nesting depth) to strings.
+ * This handles FileNode.size, ContentIdentity.size, VideoCache.sizeBytes, etc.
  */
-export function serializeNode<T extends { size?: bigint | null }>(node: T): Omit<T, "size"> & { size: string | null } {
-  return { ...node, size: node.size != null ? node.size.toString() : null };
+function deepSerializeBigInt<T>(value: T): T {
+  return JSON.parse(
+    JSON.stringify(value, (_key, val) =>
+      typeof val === "bigint" ? val.toString() : val
+    )
+  );
 }
 
-export function serializeNodes<T extends { size?: bigint | null }>(nodes: T[]): (Omit<T, "size"> & { size: string | null })[] {
-  return nodes.map(serializeNode);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function serializeNode<T>(node: T): any {
+  return deepSerializeBigInt(node);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function serializeNodes<T>(nodes: T[]): any[] {
+  return deepSerializeBigInt(nodes);
 }
 
 export function sortNodes<T extends { type: string; name: string }>(nodes: T[]): T[] {

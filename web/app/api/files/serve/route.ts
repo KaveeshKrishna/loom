@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { checkAccess } from "@/lib/acl";
-import { getArchiveStatus } from "@/lib/archive";
 import { sanitizePath } from "@/lib/utils";
 import { createReadStream } from "fs";
 import { stat } from "fs/promises";
@@ -26,11 +25,6 @@ export async function GET(req: NextRequest) {
 
   const allowed = await checkAccess(user.id, user.role, relativePath);
   if (!allowed) return NextResponse.json({ error: "Access denied" }, { status: 403 });
-
-  const archiveStatus = await getArchiveStatus();
-  if (archiveStatus !== "Online") {
-    return NextResponse.json({ error: "Archive is currently offline", status: archiveStatus }, { status: 503 });
-  }
 
   const absolutePath = join(MEDIA_ROOT, relativePath);
   if (!absolutePath.startsWith(MEDIA_ROOT + "/") && absolutePath !== MEDIA_ROOT) {

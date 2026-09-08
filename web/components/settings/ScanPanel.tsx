@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Play, CheckCircle2, XCircle, Clock, Trash2, Square } from "lucide-react";
+import { Loader2, Play, CheckCircle2, XCircle, Clock, Trash2, Square, ListX } from "lucide-react";
 
 interface ScanJob {
   id: string; type: string; status: string;
@@ -147,7 +147,20 @@ export function ScanPanel() {
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold mb-3">Recent jobs</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold">Recent jobs</h3>
+          {jobs.length > 0 && (
+            <button
+              onClick={async () => {
+                await fetch("/api/scan", { method: "DELETE" });
+                load();
+              }}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive)/0.1)] rounded-md transition-colors"
+            >
+              <ListX size={13} /> Clear All Jobs
+            </button>
+          )}
+        </div>
         {loading ? (
           <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-[hsl(var(--muted-foreground))]" /></div>
         ) : jobs.length === 0 ? (
