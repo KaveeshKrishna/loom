@@ -441,17 +441,38 @@ function route(method: string, path: string, ctx: Ctx): unknown {
     return { jobs: s.scanJobs.slice(0, 10), scannerStatus: s.scannerStatus };
   }
   if (p === "/scan" && M("POST")) {
-    const job = { id: nextId("scan"), type: "FULL_RESCAN" as const, status: "RUNNING" as const, requestedAt: new Date().toISOString(), startedAt: new Date().toISOString(), completedAt: null, error: null, processedFiles: 0, totalFiles: visible(s.nodes).length };
+    const totalFiles = visible(s.nodes).filter((n) => n.type === "FILE").length;
+    const job = { id: nextId("scan"), type: "FULL_RESCAN" as const, status: "RUNNING" as const, requestedAt: new Date().toISOString(), startedAt: new Date().toISOString(), completedAt: null, error: null, processedFiles: 0, totalFiles };
     mutate((st) => { st.scanJobs.unshift(job); st.scannerStatus = "scanning"; });
-    // Simulate a brief scan, then complete with "0 new files" — this is a
-    // static fabricated library, so nothing is ever actually found.
-    setTimeout(() => {
+    // Fabricate a realistic-looking scan: ScanPanel polls every 3s while a
+    // job is RUNNING and renders processedFiles/totalFiles as a progress
+    // bar, so climb in irregular steps over ~3.5s rather than jumping
+    // straight from 0 to done — then complete reporting "0 new files",
+    // since this is a static fabricated library and nothing is ever
+    // actually found.
+    const ticks = 8 + Math.floor(Math.random() * 4);
+    let tick = 0;
+    const stepMs = 300 + Math.random() * 150;
+    const step = () => {
+      tick += 1;
       mutate((st) => {
         const j = st.scanJobs.find((x) => x.id === job.id);
-        if (j) { j.status = "COMPLETED"; j.completedAt = new Date().toISOString(); j.processedFiles = j.totalFiles; }
-        st.scannerStatus = "idle";
+        if (!j || j.status !== "RUNNING") return; // cancelled/deleted — stop advancing
+        if (tick >= ticks) {
+          j.status = "COMPLETED";
+          j.completedAt = new Date().toISOString();
+          j.processedFiles = totalFiles;
+          st.scannerStatus = "idle";
+        } else {
+          j.processedFiles = Math.min(totalFiles, Math.round((totalFiles * tick) / ticks));
+        }
       });
-    }, 2800);
+      if (tick < ticks) {
+        const j = getState().scanJobs.find((x) => x.id === job.id);
+        if (j && j.status === "RUNNING") setTimeout(step, stepMs);
+      }
+    };
+    setTimeout(step, stepMs);
     return { job };
   }
   if (p === "/scan" && M("DELETE")) {

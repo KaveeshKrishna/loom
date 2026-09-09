@@ -18,6 +18,17 @@ import { installFetch } from "./mockServer";
 import { installUploadShim } from "./mockUpload";
 
 if (typeof window !== "undefined") {
+  // The demo defaults to dark theme (rather than the real app's OS-preference
+  // default) so first-time visitors get a consistent look starting on the
+  // login page. Seeding the same key TopBar.tsx reads means this holds after
+  // sign-in too, not just on the pre-auth login page (see swap/root-layout.tsx
+  // for the login page's own inline-script version of this default). A
+  // visitor who explicitly picks a theme via Settings still overrides this,
+  // same as production.
+  try {
+    if (!localStorage.getItem("loom-theme")) localStorage.setItem("loom-theme", "dark");
+  } catch { /* ignore */ }
+
   initState();
   installFetch();
   installUploadShim();

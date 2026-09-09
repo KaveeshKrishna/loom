@@ -244,21 +244,46 @@ export function buildFixtures(): DemoWorld {
   idCounter = 0;
   const nodes: DemoFileNode[] = [];
 
-  // ── Folder tree ──
+  // ── Folder tree ── deliberately 3 levels deep in places (folders inside
+  // folders inside folders), so the demo actually shows off nested
+  // navigation rather than one flat layer of top-level folders.
   const folders = [
     ["Photos", "Photos"],
     ["Photos/Vacation 2024", "Vacation 2024"],
+    ["Photos/Vacation 2024/Day 1 - Arrival", "Day 1 - Arrival"],
+    ["Photos/Vacation 2024/Day 2 - Beach", "Day 2 - Beach"],
+    ["Photos/Vacation 2024/Day 3 - City Tour", "Day 3 - City Tour"],
     ["Photos/Family", "Family"],
+    ["Photos/Family/Reunion 2023", "Reunion 2023"],
+    ["Photos/Family/Holiday Party", "Holiday Party"],
     ["Photos/Pets", "Pets"],
+    ["Photos/Pets/Puppy Year One", "Puppy Year One"],
     ["Videos", "Videos"],
+    ["Videos/Highlights", "Highlights"],
     ["Documents", "Documents"],
+    ["Documents/Personal", "Personal"],
+    ["Documents/Personal/Legal", "Legal"],
+    ["Documents/Receipts", "Receipts"],
     ["Work", "Work"],
+    ["Work/Projects", "Projects"],
+    ["Work/Projects/Client A", "Client A"],
+    ["Work/Projects/Client B", "Client B"],
+    ["Work/Archive", "Archive"],
     ["Misc", "Misc"],
   ];
   for (const [rel, name] of folders) nodes.push(makeDirNode(rel, name));
 
-  // ── Photos (~50, spread across the three photo subfolders) ──
-  const photoDirs = ["Photos/Vacation 2024", "Photos/Family", "Photos/Pets"];
+  // ── Photos (~50, spread across nested subfolders, plus a few loose files
+  //    directly in their parent folder so mixed file+folder listings show
+  //    up too) ──
+  const photoDirs = [
+    "Photos/Vacation 2024/Day 1 - Arrival",
+    "Photos/Vacation 2024/Day 2 - Beach",
+    "Photos/Vacation 2024/Day 3 - City Tour",
+    "Photos/Family/Reunion 2023",
+    "Photos/Family/Holiday Party",
+    "Photos/Pets/Puppy Year One",
+  ];
   const shuffledPhotoNames = [...PHOTO_NAMES];
   shuffledPhotoNames.forEach((baseName, i) => {
     const dir = photoDirs[i % photoDirs.length];
@@ -266,15 +291,32 @@ export function buildFixtures(): DemoWorld {
     const displayName = useImgStyle ? `IMG_${2000 + i}` : baseName;
     nodes.push(makePhotoNode(dir, displayName, i % 7 === 0 ? "png" : "jpg"));
   });
+  // A handful loose directly under the intermediate folders (not just leaves).
+  nodes.push(makePhotoNode("Photos", "Cover Photo"));
+  nodes.push(makePhotoNode("Photos/Vacation 2024", "Group Photo Day 1"));
+  nodes.push(makePhotoNode("Photos/Family", "Family Portrait"));
+  nodes.push(makePhotoNode("Photos/Pets", "Pets Together"));
 
-  // ── Videos (~12) ──
+  // ── Videos (~12, spread across Videos/ and Videos/Highlights) ──
   VIDEO_NAMES.forEach((baseName, i) => {
-    nodes.push(makeVideoNode("Videos", baseName, i % 5 === 0 ? "mov" : "mp4"));
+    const dir = i % 3 === 0 ? "Videos/Highlights" : "Videos";
+    nodes.push(makeVideoNode(dir, baseName, i % 5 === 0 ? "mov" : "mp4"));
   });
 
-  // ── Documents (~20, split between Documents/ and Work/) ──
+  // ── Documents (~20, spread across several nested Documents/ and Work/
+  //    subfolders) ──
+  const docDirs = [
+    "Documents",
+    "Documents/Personal",
+    "Documents/Personal/Legal",
+    "Documents/Receipts",
+    "Work",
+    "Work/Projects/Client A",
+    "Work/Projects/Client B",
+    "Work/Archive",
+  ];
   DOC_NAMES.forEach((doc, i) => {
-    const dir = i % 3 === 0 ? "Work" : "Documents";
+    const dir = docDirs[i % docDirs.length];
     nodes.push(makeDocNode(dir, doc.name, doc.ext));
   });
 
