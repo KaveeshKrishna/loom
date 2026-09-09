@@ -1,11 +1,15 @@
 /**
  * DEMO BUILD ONLY — replaces web/app/layout.tsx. Identical to the real
- * root layout, plus one line: a static top-level import of the demo
- * bootstrap module. Because that's a plain ES module import (not a
- * useEffect/dynamic import), its top-level code runs during initial script
- * evaluation — before React starts rendering or hydrating anything — which
+ * root layout, plus one thing: it renders <DemoBootstrap/>, a client
+ * component whose only job is importing the demo bootstrap module. This
+ * layout has to stay a Server Component (it exports `metadata`, which
+ * client components can't do), so the bootstrap import can't be a bare
+ * top-level import here directly — anything a Server Component imports is
+ * server-only and never reaches the browser at all. Routed through a
+ * client component instead, its top-level code still runs during initial
+ * script evaluation — before React starts hydrating anything — which
  * guarantees the fetch/XHR shims are installed before any component's
- * first data fetch. See web/lib/demo/bootstrap.ts.
+ * first data fetch. See web/lib/demo/DemoBootstrap.tsx and bootstrap.ts.
  *
  * Theme: the real app defaults to the visitor's OS preference. The demo
  * deliberately defaults to dark instead (first impression on a cold login
@@ -13,7 +17,7 @@
  * visitor toggles the theme in Settings that choice (stored under
  * 'loom-theme') wins on every later load, same as production.
  */
-import "@/lib/demo/bootstrap";
+import { DemoBootstrap } from "@/lib/demo/DemoBootstrap";
 import type { Metadata } from "next";
 import "./globals.css";
 
@@ -50,7 +54,10 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <DemoBootstrap />
+        {children}
+      </body>
     </html>
   );
 }

@@ -12,6 +12,13 @@
  * shims are always installed before any component's first data fetch.
  * (`/api/cache/*` and `/api/files/serve*` are handled separately by the
  * Service Worker at public/demo-sw.js, registered here too.)
+ *
+ * Imported via web/lib/demo/DemoBootstrap.tsx, not directly from
+ * swap/root-layout.tsx — that layout is a Server Component (it exports
+ * `metadata`), and a Server Component's imports are server-only and never
+ * reach the browser. This was shipped broken once already: without that
+ * indirection, this file's code never ran client-side at all, so every
+ * /api/* call silently fell through to the real network.
  */
 import { initState } from "./state";
 import { installFetch } from "./mockServer";

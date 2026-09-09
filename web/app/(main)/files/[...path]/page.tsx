@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useMemo, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { FileGrid } from "@/components/files/FileGrid";
 import { FileList } from "@/components/files/FileList";
 import { FileGridSkeleton, FileListSkeleton } from "@/components/files/FileSkeletons";
@@ -19,13 +19,20 @@ import { sortNodes } from "@/lib/utils";
 type FileNodeWithThumbnail = FileNode & { contentIdentity: ({ thumbnail: Thumbnail | null; preview: Preview | null }) | null };
 
 export default function FilesPage() {
-  const params = useParams();
+  // Derived from the live URL rather than useParams(): the latter reflects
+  // whatever params this route instance was matched/rendered with, which in
+  // a fully static export (the public demo build's `output: "export"`) is
+  // fixed at build time to a single placeholder value and never updates —
+  // not on client-side navigation, and not even across a hard reload of a
+  // deep-linked folder URL. usePathname() always tracks the real address
+  // bar in both the real server-rendered app and the demo, so this works
+  // identically in both.
+  const pathname = usePathname();
   const router = useRouter();
-  const pathSegments = Array.isArray(params.path)
-    ? params.path.map(decodeURIComponent)
-    : params.path
-    ? [decodeURIComponent(params.path as string)]
-    : [];
+  const pathSegments = useMemo(() => {
+    const rel = pathname.replace(/^\/files\/?/, "");
+    return rel ? rel.split("/").map(decodeURIComponent) : [];
+  }, [pathname]);
   const currentPath = pathSegments.join("/");
 
   const [nodes, setNodes] = useState<FileNodeWithThumbnail[]>([]);

@@ -26,7 +26,16 @@ function load(): DemoWorld {
 }
 
 export function initState(): DemoWorld {
-  if (!state) state = load();
+  if (!state) {
+    state = load();
+    // Persist immediately, even for a freshly-generated world. load() only
+    // returns buildFixtures() in memory on a brand-new visit — without this,
+    // a page refresh before the visitor makes any actual edit (which is the
+    // only other thing that calls save()) would find nothing in localStorage
+    // and silently regenerate a whole new random world, making file sizes
+    // and other randomized values shift on every reload.
+    save();
+  }
   return state;
 }
 
