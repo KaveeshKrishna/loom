@@ -1,12 +1,33 @@
 # Static hosting for the Loom demo build. Replace DEMO_DOMAIN and the path,
 # append to your Caddyfile, then reload Caddy.
 #
-# The demo is a static SPA with no backend, so this only needs file
-# serving + an SPA fallback — no reverse_proxy.
+# Unlike a typical Vite/CRA SPA (one index.html for every route, all routing
+# done client-side), Next.js's static export (`output: "export"`) prerenders
+# a separate *.html file per route (login.html, photos.html, settings.html,
+# ...) — so a plain `try_files {path} /index.html` silently serves the site
+# root for every one of those routes on a direct hit or page refresh.
+# `{path}.html` must be tried first.
+#
+# The one dynamic route, the files browser (`/files/[...path]`), can't be
+# individually prerendered at all (there's no backend to enumerate real
+# paths against) — it's built with a single placeholder page at
+# `/files/_.html` that reads the real folder path from window.location
+# client-side. Any deep-linked or refreshed URL under /files/ (e.g.
+# /files/Photos/Vacation%202024) must be rewritten to that placeholder
+# instead of falling through to the site root, or it loses the target path
+# and bounces back to /files.
 
 http://DEMO_DOMAIN {
     root * /path/to/loom/loom-demo/dist
     encode gzip
-    try_files {path} /index.html
+
+    @filesRoute {
+        path /files/*
+        not path /files/_.html
+        not path /files/_.txt
+    }
+    rewrite @filesRoute /files/_.html
+
+    try_files {path} {path}.html /index.html
     file_server
 }
