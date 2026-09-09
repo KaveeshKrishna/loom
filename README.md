@@ -6,6 +6,8 @@ Loom is a self-hosted, permission-aware file manager for your own server or NAS.
 
 It is built around one rule: **your files stay exactly where they are, organized exactly how you left them.** Loom is a window onto your filesystem, not a walled garden that reimports and reorganizes it.
 
+**[Try the live demo](https://loomdemo.kaveeshkrishna.in)** — a fully fabricated, backend-less build with no real data and no login required (any credentials work). See [loom-demo/](loom-demo/) for how it's built.
+
 ## Features
 
 - **Fast, responsive file browser** — grid and list views, drag-and-drop upload, cut/copy/paste, rename, folder creation, right-click context menus, and long-press support on touch devices.
