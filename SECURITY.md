@@ -1,32 +1,32 @@
-# Security Policy
+# Security
 
-Loom manages access to your personal files — please report vulnerabilities responsibly rather than through a public issue.
+Loom controls access to your personal files, so please report security bugs privately instead of in a public issue.
 
-## Reporting a vulnerability
+## Reporting
 
-Use GitHub's private vulnerability reporting for this repository:
+Use GitHub's private vulnerability reporting for this repo:
 
-1. Go to the **Security** tab of the repository.
+1. Go to the repo's **Security** tab.
 2. Click **Report a vulnerability**.
-3. Describe the issue, the affected version/commit, and steps to reproduce if possible.
+3. Describe the problem, which version or commit it affects, and how to reproduce it if you can.
 
-This opens a private conversation with the maintainer that isn't visible publicly until it's resolved.
+That starts a private thread with me that stays hidden until it's fixed.
 
-Please include, where relevant:
-- Affected component (`web` app, `scanner`, path security / ACL logic, auth, etc.)
-- Steps to reproduce, or a minimal proof of concept
-- The potential impact (e.g. path traversal outside the media root, privilege escalation between Family and Owner roles, authentication bypass)
+Include, if it's relevant:
+- Which part is affected (`web`, `scanner`, path security / ACL, auth, and so on)
+- Steps to reproduce, or a small proof of concept
+- What the impact is. For example: reading files outside the media root, a Family user getting Owner access, or logging in without valid credentials.
 
 ## Scope
 
-In scope: the code in this repository (`web/`, `scanner/`, installer scripts, Dockerfiles/compose configuration) as shipped.
+In scope: the code in this repo (`web/`, `scanner/`, the installer scripts, the Dockerfiles and compose config) as shipped.
 
-Out of scope: vulnerabilities in third-party dependencies (report those upstream — feel free to also flag them here if Loom's usage makes the impact worse than typical), and issues arising purely from a misconfigured deployment (e.g. deliberately exposing the container port publicly against the documented guidance in [docs/REVERSE-PROXY.md](docs/REVERSE-PROXY.md)).
+Out of scope: bugs in third-party dependencies (report those upstream, though feel free to flag it here too if Loom's use of it makes things worse), and problems that only happen because of a misconfigured setup, like exposing the container port to the internet when [docs/REVERSE-PROXY.md](docs/REVERSE-PROXY.md) says not to.
 
-## Supported versions
+## Versions
 
-Loom does not yet maintain multiple release branches — security fixes are made against the latest commit on `main`. If you're running an older version, please update before reporting, if practical, to confirm the issue still applies.
+There's only one line of development right now. Security fixes go on the latest `main`. If you're on an older version, update first if you can, to check the bug is still there.
 
-## Response expectations
+## Response time
 
-This is a project maintained in spare time, so please allow a reasonable window for a response. Critical issues (e.g. remote path traversal, auth bypass) will be prioritized.
+This is a spare-time project, so give me a reasonable amount of time to reply. Serious bugs like remote path traversal or auth bypass come first.

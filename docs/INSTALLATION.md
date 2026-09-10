@@ -1,14 +1,14 @@
-# Installation
+# Installing Loom
 
-## Requirements
+## What you need
 
-- Docker Engine + Docker Compose v2 (`docker compose version` should work).
-- A directory of files to manage, and free disk space elsewhere for a derived-media cache (thumbnails/previews/HLS segments) — see [Architecture](ARCHITECTURE.md) for why this is a separate location from your files.
-- `git`, `openssl`, and `curl` on the host (used by the installer script; all three are near-universal on Linux).
+- Docker Engine and Docker Compose v2 (`docker compose version` should work).
+- A folder of files to manage, and free disk space somewhere else for the cache (thumbnails, previews, HLS segments). [How Loom works](ARCHITECTURE.md) explains why the cache is separate.
+- `git`, `openssl`, and `curl` on the host. The installer uses them. All three come with almost every Linux install.
 
-Loom has been developed and tested on Linux. It should work anywhere Docker runs, but paths and permissions guidance below assume Linux.
+Loom is built and tested on Linux. It should run anywhere Docker does, but the path and permission notes below assume Linux.
 
-## One-command install
+## One command
 
 ```bash
 git clone https://github.com/kaveeshkrishna/loom.git
@@ -16,17 +16,17 @@ cd loom
 ./scripts/install.sh
 ```
 
-The script will:
-1. Check that Docker and Docker Compose are available.
-2. Ask where your files live (`LOOM_MEDIA_PATH`) and where to put the cache (`LOOM_CACHE_PATH`), plus the bind address/port and your public URL.
-3. Generate `.env` from `.env.example`, filling in random `POSTGRES_PASSWORD` and `BETTER_AUTH_SECRET` values. It never overwrites an existing `.env`.
-4. Create the media/cache directories if they don't exist, and fix ownership on the cache directory (see [Troubleshooting](TROUBLESHOOTING.md#permission-denied-writing-to-cache) if this fails).
-5. Build the Docker images and start the containers.
-6. Wait for `/api/health` to report ready.
+The script:
+1. Checks Docker and Docker Compose are there.
+2. Asks where your files are (`LOOM_MEDIA_PATH`), where the cache goes (`LOOM_CACHE_PATH`), the bind address and port, and your public URL.
+3. Makes `.env` from `.env.example` with random `POSTGRES_PASSWORD` and `BETTER_AUTH_SECRET` values. It never overwrites an existing `.env`.
+4. Makes the media and cache folders if they're missing, and fixes ownership on the cache folder. If that fails, see [Troubleshooting](TROUBLESHOOTING.md#permission-denied-writing-to-cache).
+5. Builds the images and starts the containers.
+6. Waits for `/api/health` to say it's ready.
 
-It's safe to re-run at any time — it won't touch an existing `.env` or clobber running containers.
+You can re-run it any time. It won't touch an existing `.env` or restart running containers.
 
-For a non-interactive install (CI, scripted provisioning), export the variables first and pass `--non-interactive`:
+For a non-interactive install (CI, scripts), set the variables first and pass `--non-interactive`:
 
 ```bash
 LOOM_MEDIA_PATH=/mnt/media \
@@ -37,9 +37,9 @@ BETTER_AUTH_URL=https://loom.example.com \
   ./scripts/install.sh --non-interactive
 ```
 
-## Manual install
+## By hand
 
-If you'd rather do it by hand, or need to customize something the script doesn't ask about:
+If you'd rather do it yourself, or need to change something the script doesn't ask about:
 
 ```bash
 git clone https://github.com/kaveeshkrishna/loom.git
@@ -47,14 +47,14 @@ cd loom
 cp .env.example .env
 ```
 
-Edit `.env` and set, at minimum:
-- `LOOM_MEDIA_PATH` — host path to your files
-- `LOOM_CACHE_PATH` — host path for the derived-media cache
-- `POSTGRES_PASSWORD` — a strong random password (e.g. `openssl rand -hex 24`)
-- `BETTER_AUTH_SECRET` — a long random string (e.g. `openssl rand -base64 48`)
-- `BETTER_AUTH_URL` / `TRUSTED_ORIGINS` — the URL you'll access Loom at
+Edit `.env` and set at least:
+- `LOOM_MEDIA_PATH`, the host path to your files
+- `LOOM_CACHE_PATH`, the host path for the cache
+- `POSTGRES_PASSWORD`, a strong random password (`openssl rand -hex 24`)
+- `BETTER_AUTH_SECRET`, a long random string (`openssl rand -base64 48`)
+- `BETTER_AUTH_URL` and `TRUSTED_ORIGINS`, the URL you'll use
 
-See [Configuration](CONFIGURATION.md) for every variable.
+[Configuration](CONFIGURATION.md) lists every variable.
 
 Then:
 
@@ -63,15 +63,15 @@ docker compose build
 docker compose up -d
 ```
 
-Database migrations run automatically on container startup (see `web/docker-entrypoint.sh`) — there is no separate migration step to run by hand.
+Migrations run when the container starts (see `web/docker-entrypoint.sh`). There's no separate migration step.
 
 ## First login
 
-Open Loom in your browser. A fresh install with zero users automatically shows a setup page instead of a login form — create your account there. That first account is automatically promoted to the **Owner** role, which has unrestricted access. The setup page becomes unreachable (redirects to login) the moment any account exists, so it can't be used to create a second privileged account later.
+Open Loom in a browser. A fresh install with no users shows a setup page instead of a login form. Make your account there. That first account becomes the **Owner**, which can do everything. Once any account exists, the setup page redirects to login, so nobody can use it to make a second Owner later.
 
-Additional accounts (Settings → Users, as the Owner) get the **Family** role by default, whose visibility can be restricted per-path in Settings → Permissions.
+More accounts (Settings, then Users, as the Owner) get the **Family** role. You can limit what they see per folder in Settings, then Permissions.
 
-## Next steps
+## Next
 
-- [Reverse Proxy Setup](REVERSE-PROXY.md) if you want to reach Loom from outside your local network.
-- [Architecture](ARCHITECTURE.md) to understand the scanning/caching model before you have thousands of files indexed.
+- [Reverse proxy](REVERSE-PROXY.md) if you want Loom reachable from outside your network.
+- [How Loom works](ARCHITECTURE.md) to understand scanning and caching before you have thousands of files indexed.

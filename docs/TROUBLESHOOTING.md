@@ -2,41 +2,41 @@
 
 ## Permission denied writing to cache
 
-The `loom-web` container runs as the built-in `node` user, UID/GID `1000:1000` — this matches how most Linux distros number their first regular user, but if your `LOOM_CACHE_PATH` directory was created by a different user (or root), Loom won't be able to write thumbnails/previews/HLS segments into it.
+The `loom-web` container runs as the `node` user, UID/GID `1000:1000`. That's the first regular user on most Linux distros, but if your `LOOM_CACHE_PATH` folder was made by a different user or by root, Loom can't write thumbnails, previews, or HLS segments into it.
 
 Fix:
 ```bash
 sudo chown -R 1000:1000 /path/to/your/cache
 ```
 
-`scripts/install.sh` attempts this automatically for a newly-created cache directory, but can't if it doesn't have permission to `chown` (e.g. not run with sudo and the directory isn't yours) — it'll warn you in that case.
+`scripts/install.sh` tries this for a folder it just made, but it can't if it doesn't have permission to `chown` (not run with sudo, folder isn't yours). It warns you when that happens.
 
-`LOOM_MEDIA_PATH` does not need this — Loom only needs read access to most of it, plus write access to its own `.LoomTrash/` and `.tmp-upload/` subdirectories, which it creates itself on first use.
+`LOOM_MEDIA_PATH` doesn't need this. Loom only reads most of it, plus writes to its own `.LoomTrash/` and `.tmp-upload/` subfolders, which it makes itself.
 
-## Files added to the drive don't show up
+## New files on the drive don't show up
 
-Loom does not watch the filesystem in real time (see [Architecture](ARCHITECTURE.md#the-idle-drive-principle) for why) — new files only appear after a manual rescan: **Settings → Scanner → Scan Now** (Owner only). Check **Settings → Scanner** for job status/errors if a rescan doesn't pick up what you expect.
+Loom doesn't watch the filesystem (see [How Loom works](ARCHITECTURE.md#keeping-the-drive-idle)). New files show up after a manual rescan: **Settings, then Scanner, then Scan Now** (Owner only). Check **Settings, then Scanner** for job status and errors if a rescan misses something.
 
-## A video won't play / keeps buffering
+## A video won't play or keeps buffering
 
-- Check `docker compose logs -f loom-web` for `[HLS]`/`[HLS-seg]` log lines while attempting playback.
-- The first request to a new region of an incompatible-format video has to wait for FFmpeg to actually produce that segment — a few seconds is normal for large/high-bitrate source files. If it never resolves, the container may be resource-constrained (HLS transcoding is CPU-bound); check `docker stats`.
-- If you previously saw errors and the browser has cached a broken/truncated segment response, hard-refresh (or clear site data for the Loom origin) before assuming it's still broken server-side.
-- Confirm `ffmpeg` is present and working inside the container: `docker compose exec loom-web ffmpeg -version`.
+- Watch `docker compose logs -f loom-web` for `[HLS]` and `[HLS-seg]` lines while you try to play it.
+- The first request for a new region of an incompatible video waits for FFmpeg to make that segment. A few seconds is normal for big or high-bitrate files. If it never finishes, the container might be short on resources (HLS transcoding is CPU-heavy). Check `docker stats`.
+- If you saw errors earlier and the browser cached a broken segment, hard-refresh or clear site data for the Loom origin before assuming the server is still broken.
+- Check FFmpeg works in the container: `docker compose exec loom-web ffmpeg -version`.
 
-## A file is shown as "Corrupt" or "Unsupported" and I don't think it should be
+## A file says "Corrupt" or "Unsupported" and I don't think it should
 
-Check **File Health** in the sidebar — it distinguishes the two:
-- **Unsupported** means the file is valid, but Loom's current thumbnail/preview/probe pipeline doesn't handle that format. This is not data loss.
-- **Corrupt** means Loom attempted to read/analyze the file and it appears structurally damaged (a truncated video with no `moov atom`, for instance).
+Check **File Health** in the sidebar. It tells the two apart:
+- **Unsupported** means the file is fine, but Loom's thumbnail/preview/probe pipeline doesn't handle that format. Nothing is lost.
+- **Corrupt** means Loom tried to read the file and it looks damaged (a cut-off video with no `moov atom`, for example).
 
-Both statuses are tied to the exact file version at the time of the check (its size+mtime). If you replace the file with a working copy, a rescan re-evaluates it. There's also an explicit "Retry Analysis" action on the File Health page that bypasses the cached result without needing a full rescan.
+Both are tied to the file's size and mtime at the time of the check. Replace the file with a good copy and a rescan re-checks it. There's also a "Retry Analysis" button on the File Health page that re-checks without a full rescan.
 
-## Setup page won't let me create an account / says setup is already complete
+## Setup page won't let me make an account, or says setup is done
 
-The `/setup` page and its API are only reachable while the user table is empty — this is intentional, to prevent it from ever becoming a way to create a second privileged account later. If you need to add more users after initial setup, use **Settings → Users** as the Owner instead.
+The `/setup` page and its API only work while the user table is empty. That's on purpose, so it can't be used to make a second Owner later. To add users after setup, use **Settings, then Users** as the Owner.
 
-If you're locked out entirely (lost the Owner password, no other Owner account), you'll need direct database access to reset it — there is currently no self-service password reset flow.
+If you're locked out completely (lost the Owner password, no other Owner), you need direct database access to reset it. There's no password reset flow yet.
 
 ## Scanner container keeps restarting
 
@@ -44,22 +44,22 @@ If you're locked out entirely (lost the Owner password, no other Owner account),
 docker compose logs loom-scanner --tail=100
 ```
 
-Common causes:
-- `LOOM_MEDIA_PATH` doesn't exist or isn't readable by the container — check the path in `.env` actually exists on the host.
-- Database not reachable yet — the scanner depends on `postgres` being healthy; check `docker compose ps`.
+Usual causes:
+- `LOOM_MEDIA_PATH` doesn't exist or the container can't read it. Check the path in `.env` is really there on the host.
+- The database isn't up yet. The scanner needs `postgres` healthy. Check `docker compose ps`.
 
 ## Schema drift between web/ and scanner/
 
-If you've hand-edited `web/prisma/schema.prisma` without touching `scanner/prisma/schema.prisma` (or vice versa), the scanner's generated Prisma client can disagree with the actual database schema. Run:
+If you edited `web/prisma/schema.prisma` without editing `scanner/prisma/schema.prisma` (or the other way around), the scanner's Prisma client can disagree with the real database. Run:
 
 ```bash
-./scripts/sync-schema.sh          # checks; exits non-zero if out of sync
+./scripts/sync-schema.sh          # checks, exits non-zero if out of sync
 ./scripts/sync-schema.sh --fix    # copies web's schema over scanner's
 ```
 
-## Still stuck?
+## Still stuck
 
 Open an issue with:
-- `docker compose logs --tail=200` for the affected service
-- Your Loom version / commit
-- Whether this is a fresh install or an upgrade (and from what version, if so)
+- `docker compose logs --tail=200` for the service involved
+- Your Loom version or commit
+- Whether it's a fresh install or an upgrade, and from what version

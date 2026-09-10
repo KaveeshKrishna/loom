@@ -1,74 +1,77 @@
 # Contributing to Loom
 
-Thanks for considering it. Loom is a small project maintained in spare time — please be patient with review turnaround.
+Thanks for wanting to help. Loom is a small side project, so reviews might take a while.
 
-## Before you contribute: license terms
+## License, first
 
-Loom is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE), not an OSI-approved open-source license. By submitting a contribution, you agree it will be distributed under those same terms — meaning your contribution, like the rest of the project, may be used freely for noncommercial purposes, but commercial use requires the maintainer's permission. If that's not something you're comfortable with, please don't open a PR; issues, discussion, and bug reports are still very welcome regardless.
+Loom uses the [PolyForm Noncommercial License 1.0.0](LICENSE), which is not an OSI open-source license. If you send a pull request, you're agreeing your code goes out under the same license: free for noncommercial use, but commercial use needs my permission. If you're not okay with that, please don't open a PR. Issues, questions, and bug reports are still welcome either way.
 
-## Development setup
+## Setup
 
-Requirements: Docker + Docker Compose v2, Node.js 22+ (for editor tooling/linting outside containers), `git`.
+You need Docker with Compose v2, Node.js 22+ for editor tooling and linting outside containers, and git.
 
 ```bash
 git clone https://github.com/kaveeshkrishna/loom.git
 cd loom
 cp .env.example .env
-# edit .env — for local dev, LOOM_MEDIA_PATH/LOOM_CACHE_PATH can point
-# at throwaway local directories, e.g. ./dev-data/media, ./dev-data/cache
+# edit .env. for local dev, LOOM_MEDIA_PATH and LOOM_CACHE_PATH can be
+# throwaway folders like ./dev-data/media and ./dev-data/cache
 docker compose up -d
 ```
 
-Rebuild after changing `web/` or `scanner/` source:
+Rebuild after changing anything in `web/` or `scanner/`:
+
 ```bash
 docker compose build loom-web loom-scanner
 docker compose up -d
 ```
 
-For faster iteration on the web app specifically, you can run it outside Docker against the Dockerized Postgres:
+To iterate faster on the web app, run it outside Docker against the Docker Postgres:
+
 ```bash
 cd web
 npm install --legacy-peer-deps
 DATABASE_URL=postgresql://loom:<password from .env>@localhost:5432/loom npm run dev
 ```
-(You'll need to expose Postgres's port in `compose.yml` locally, or run `postgres` standalone, for this.)
+
+For that you need Postgres's port exposed in `compose.yml`, or run `postgres` on its own.
 
 ## Schema changes
 
-The Prisma schema lives in `web/prisma/schema.prisma`; `scanner/prisma/schema.prisma` must stay byte-identical (`./scripts/sync-schema.sh --fix` after editing). When changing the schema:
+The Prisma schema is in `web/prisma/schema.prisma`. The copy in `scanner/prisma/schema.prisma` has to match it exactly, so run `./scripts/sync-schema.sh --fix` after editing. To make a migration:
 
 ```bash
 cd web
 npx prisma migrate dev --name describe_your_change
 ```
 
-This generates a new migration under `web/prisma/migrations/`. Commit the generated SQL — don't hand-edit past migrations.
+That writes a new migration under `web/prisma/migrations/`. Commit the SQL it generates. Don't edit old migrations by hand.
 
-## Code conventions
+## Code notes
 
-A few load-bearing patterns that aren't obvious from reading any single file — please keep these in mind before touching filesystem or API-route code:
+A few things that aren't obvious from any one file. Keep them in mind before touching filesystem or API code.
 
-- Any API response containing a `FileNode` or `ContentIdentity` must go through `serializeNode`/`serializeNodes` (`web/lib/utils.ts`) — both have `BigInt` fields that throw on plain `JSON` serialization otherwise.
-- Every query for user-visible files needs `inTrash: false` in its `where` clause, or trashed items reappear across the app.
-- Call `resolveAndValidate()` (`web/lib/path-security.ts`) before any filesystem operation — never construct an absolute path by hand.
-- Empty string is a valid path (it means the media root) — check with `== null`, never `!destDir`.
-- Moving/renaming/trashing a directory must cascade to all descendant `FileNode`s' `relativePath`/`inTrash`, or children silently desync from disk.
-- See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design principles (idle-drive scanning, content-based deduplication, trash semantics) behind these rules.
+- Any API response with a `FileNode` or `ContentIdentity` in it has to go through `serializeNode` or `serializeNodes` from `web/lib/utils.ts`. Both types have `BigInt` fields that break normal `JSON` serialization.
+- Every query for files a user can see needs `inTrash: false` in the `where`, or trashed files show up all over the app.
+- Call `resolveAndValidate()` from `web/lib/path-security.ts` before any filesystem operation. Don't build absolute paths yourself.
+- An empty string is a valid path. It means the media root. Check it with `== null`, not `!destDir`.
+- Moving, renaming, or trashing a folder has to cascade to every child `FileNode`'s `relativePath` and `inTrash`, or the children get out of sync with the disk.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) covers the ideas behind these rules: idle-drive scanning, dedup by content, trash behavior.
 
 ## Pull requests
 
-- Keep PRs focused — one logical change per PR is much easier to review than a bundle of unrelated fixes.
-- Run `docker compose build loom-web loom-scanner` locally and confirm both succeed before opening a PR; CI will re-check this but it's faster to catch locally.
-- Describe what changed and why, not just what — especially for anything touching filesystem operations (path security, trash, collision handling), where the "why" often matters more than the diff.
-- If your change touches the schema, mention the migration file name in the PR description.
+- One change per PR. A focused PR is much easier to review than a pile of unrelated fixes.
+- Run `docker compose build loom-web loom-scanner` and make sure both pass before opening the PR. CI checks this too, but catching it locally is faster.
+- Say what changed and why, not just what. This matters most for filesystem code (path security, trash, collision handling), where the reason matters more than the diff.
+- If you changed the schema, put the migration file name in the PR description.
 
-## Reporting bugs
+## Bug reports
 
 Open an issue with:
-- What you expected vs. what happened
-- `docker compose logs --tail=200` for the relevant service, if it's a runtime issue
-- Whether it reproduces on a fresh install or only on your existing data
+- What you expected and what actually happened
+- `docker compose logs --tail=200` for the service involved, if it's a runtime bug
+- Whether it happens on a fresh install or only with your existing data
 
-## Reporting security issues
+## Security bugs
 
-Please don't open a public issue for a security vulnerability — see [SECURITY.md](SECURITY.md).
+Don't open a public issue for a security bug. See [SECURITY.md](SECURITY.md).

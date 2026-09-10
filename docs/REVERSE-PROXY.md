@@ -1,12 +1,12 @@
-# Reverse Proxy Setup
+# Reverse proxy
 
-Loom binds to `127.0.0.1:$LOOM_PORT` on the host by default (see [Configuration](CONFIGURATION.md)) — it is not meant to be exposed to the internet directly. Put a reverse proxy in front of it for TLS termination and a proper hostname.
+Loom binds to `127.0.0.1:$LOOM_PORT` on the host by default (see [Configuration](CONFIGURATION.md)). It's not meant to face the internet directly. Put a reverse proxy in front of it for HTTPS and a real hostname.
 
-Whichever proxy you use, remember to also set `BETTER_AUTH_URL` and `TRUSTED_ORIGINS` in `.env` to match the public URL, and restart (`docker compose up -d`) after changing them.
+Whatever proxy you use, also set `BETTER_AUTH_URL` and `TRUSTED_ORIGINS` in `.env` to the public URL, then run `docker compose up -d` again.
 
 ## Caddy
 
-Caddy handles HTTPS automatically via Let's Encrypt if it can reach the internet on ports 80/443.
+Caddy gets HTTPS certificates from Let's Encrypt on its own if it can reach the internet on ports 80 and 443.
 
 ```caddyfile
 loom.example.com {
@@ -29,7 +29,7 @@ server {
     ssl_certificate     /etc/letsencrypt/live/loom.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/loom.example.com/privkey.pem;
 
-    client_max_body_size 0;  # uploads can be large
+    client_max_body_size 0;  # uploads can be big
 
     location / {
         proxy_pass http://127.0.0.1:8085;
@@ -38,7 +38,7 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # HLS video streaming holds connections open while segments generate
+        # HLS streaming holds the connection open while segments are made
         proxy_read_timeout 60s;
         proxy_buffering off;
     }
@@ -47,7 +47,7 @@ server {
 
 ## Traefik (Docker labels)
 
-If you'd rather let Traefik discover Loom via Docker labels instead of a static config file, add these to the `loom-web` service in `compose.yml` (and remove the `ports:` mapping, since Traefik will reach it over the Docker network directly):
+To have Traefik find Loom through Docker labels instead of a config file, add these to the `loom-web` service in `compose.yml`, and remove the `ports:` mapping since Traefik reaches it over the Docker network:
 
 ```yaml
     labels:
@@ -59,7 +59,7 @@ If you'd rather let Traefik discover Loom via Docker labels instead of a static 
 
 ## Cloudflare Tunnel
 
-Useful if your server has no directly reachable public IP (common behind CGNAT / most residential ISPs). `cloudflared` runs as its own process/container and creates an outbound-only tunnel; pair it with a local reverse proxy (Caddy/nginx) as above rather than pointing it at the container port directly, so you keep normal proxy behavior (headers, timeouts) in one place.
+Handy if your server has no public IP you can reach (common with CGNAT and most home ISPs). `cloudflared` runs as its own process or container and makes an outbound-only tunnel. Point it at a local Caddy or nginx, not the container port, so proxy behavior (headers, timeouts) stays in one place.
 
 ```yaml
 # /etc/cloudflared/config.yml
@@ -67,7 +67,7 @@ tunnel: <your-tunnel-id>
 credentials-file: /path/to/<tunnel-id>.json
 ingress:
   - hostname: loom.example.com
-    service: http://127.0.0.1:80   # your local Caddy/nginx, not the container directly
+    service: http://127.0.0.1:80   # your local Caddy/nginx, not the container
   - service: http_status:404
 ```
 
@@ -76,8 +76,8 @@ cloudflared tunnel route dns <tunnel-name> loom.example.com
 sudo systemctl restart cloudflared
 ```
 
-## Large uploads and long-running requests
+## Big uploads and slow requests
 
-Two things worth checking regardless of which proxy you use:
-- **No hard body-size limit** — uploads of large video files need `client_max_body_size 0;` (nginx) or the equivalent unlimited setting for your proxy.
-- **Reasonable read/proxy timeouts** — HLS segment generation can take a few seconds for the first request to a given region of a video; a very short proxy timeout can cut that off. 60 seconds is a safe floor.
+Two things to check with any proxy:
+- **No body size limit.** Large video uploads need `client_max_body_size 0;` in nginx, or the equivalent for your proxy.
+- **Long enough timeouts.** The first request for a region of a video can take a few seconds while HLS segments are made. A very short proxy timeout cuts that off. 60 seconds is a safe minimum.

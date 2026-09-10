@@ -1,33 +1,31 @@
 # Loom
 
-> Weaving your digital life together.
+Loom is a self-hosted file manager for a server or NAS. You point it at a folder of files you already have (photos, videos, documents, anything) and it gives you a web app to browse, search, and stream them from anywhere.
 
-Loom is a self-hosted, permission-aware file manager for your own server or NAS. Point it at a directory of files you already own — photos, videos, documents, whatever — and get a fast, modern web UI to browse, search, organize, and stream them from anywhere, without ever losing control of the underlying filesystem.
+The main idea: your files don't move. Loom reads the folder you give it and shows you what's there. It doesn't copy your files into its own storage and it doesn't rearrange them. If you stop using Loom, your files are exactly where they were.
 
-It is built around one rule: **your files stay exactly where they are, organized exactly how you left them.** Loom is a window onto your filesystem, not a walled garden that reimports and reorganizes it.
+[Try the live demo](https://loomdemo.kaveeshkrishna.in). It's a fake version with no backend and no real data. Any username and password works. The code for it is in [loom-demo/](loom-demo/).
 
-**[Try the live demo](https://loomdemo.kaveeshkrishna.in)** — a fully fabricated, backend-less build with no real data and no login required (any credentials work). See [loom-demo/](loom-demo/) for how it's built.
+## What it does
 
-## Features
+- Browse files in a grid or a list. Upload by drag and drop, cut/copy/paste, rename, make folders, right-click menus. Works on touch screens too.
+- Full-screen photo and video viewer with a filmstrip of the other files in the folder and keyboard shortcuts.
+- Video streaming. Videos the browser can already play are served as-is. Formats it can't play (HEVC, MOV, MKV, AVI, and so on) get converted while you watch, one piece at a time, so playback starts right away instead of waiting for the whole file to convert.
+- If the same file exists in more than one place, Loom makes only one thumbnail, preview, and video cache for it, and only when something actually needs it.
+- Deleted files go to a trash folder for 15 days before they're really gone. Restoring checks for conflicts first.
+- Broken or unsupported files get flagged on their own page so you don't mix them up with missing files.
+- More than one user. There's an Owner role and a Family role. Family users can be limited to certain folders.
+- Every change (move, delete, restore, rename, permission change) is written to a log.
+- Loom doesn't watch the disk and doesn't scan on startup. Drives can spin down and stay down until you ask for a rescan.
 
-- **Fast, responsive file browser** — grid and list views, drag-and-drop upload, cut/copy/paste, rename, folder creation, right-click context menus, and long-press support on touch devices.
-- **Smart media viewer** — full-screen photo/video viewer with a sibling timeline, EXIF-aware sorting, and keyboard navigation.
-- **Region-based HLS video streaming** — natively-compatible videos stream directly; incompatible formats (HEVC, MOV, MKV, AVI, etc.) are transcoded on the fly, one requested segment at a time, so playback starts immediately without transcoding the whole file up front.
-- **Content-aware deduplication** — identical files (by content, not just by path) share a single thumbnail/preview/HLS cache, computed lazily only when actually needed — never during a routine scan.
-- **Trash with recovery** — deleted items move to a sandboxed trash for 15 days before permanent removal, with conflict-safe restore.
-- **File health tracking** — corrupt or unsupported media files are flagged and browsable separately, so they don't get mistaken for missing files.
-- **Multi-user with per-path permissions** — an Owner role plus a Family role with path-based access control lists, so you can share the library without sharing everything in it.
-- **Full audit log** — every mutating action (move, delete, restore, rename, permission change) is recorded.
-- **Idle-by-default storage philosophy** — no filesystem watcher, no background hashing, no scan-on-startup. Your disks spin down and stay down between explicit rescans.
+## What you need
 
-## Requirements
+- A Linux server, or anything that runs Docker. A home server, NAS, or VPS is the point.
+- Docker Engine and Docker Compose v2.
+- The folder of files you want to manage, plus some free space somewhere else for the thumbnail/preview/video cache. See [How Loom works](docs/ARCHITECTURE.md).
+- To reach Loom from outside your home network, a reverse proxy (Caddy, nginx, Traefik) or a tunnel (Cloudflare Tunnel, Tailscale). See [docs/REVERSE-PROXY.md](docs/REVERSE-PROXY.md).
 
-- A Linux server (or any machine that can run Docker) — self-hosting on a home server/NAS/VPS is the intended use case.
-- [Docker Engine](https://docs.docker.com/engine/install/) and [Docker Compose v2](https://docs.docker.com/compose/install/).
-- A directory of files you want to manage, and some free disk space for a thumbnail/preview/video cache (separate from your files — see [Architecture](docs/ARCHITECTURE.md)).
-- A reverse proxy (Caddy, nginx, Traefik) or tunnel (Cloudflare Tunnel, Tailscale) if you want to reach Loom from outside your local network — see [docs/REVERSE-PROXY.md](docs/REVERSE-PROXY.md).
-
-## Quick Start
+## Install
 
 ```bash
 git clone https://github.com/kaveeshkrishna/loom.git
@@ -35,60 +33,60 @@ cd loom
 ./scripts/install.sh
 ```
 
-The installer will ask where your files live, generate secrets, build the containers, and start Loom. When it's done, open the printed URL and create your owner account — Loom detects a fresh install automatically and shows a first-run setup page instead of a login form.
+The installer asks where your files are, makes the secrets, builds the containers, and starts everything. When it finishes, open the URL it prints and make your Owner account. Loom notices it's a fresh install and shows a setup page instead of a login form.
 
-Prefer to do it by hand? See [docs/INSTALLATION.md](docs/INSTALLATION.md) for the manual steps and every configuration option.
+To set it up yourself, see [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
-## Configuration
+## Config
 
-All configuration lives in a single `.env` file at the repo root (generated from `.env.example` by the installer). Full reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+Everything is in one `.env` file in the repo root. The installer makes it from `.env.example`. Full list: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-| Variable | Purpose |
+| Variable | What it's for |
 |---|---|
-| `LOOM_MEDIA_PATH` | Host path to the directory of files Loom manages |
-| `LOOM_CACHE_PATH` | Host path for thumbnails/previews/video cache |
-| `LOOM_BIND` / `LOOM_PORT` | Local bind address/port for the web app |
-| `POSTGRES_PASSWORD` | Database password (auto-generated by the installer) |
-| `BETTER_AUTH_SECRET` | Session signing secret (auto-generated by the installer) |
-| `BETTER_AUTH_URL` / `TRUSTED_ORIGINS` | The public URL you'll access Loom at |
+| `LOOM_MEDIA_PATH` | Where your files are on the host |
+| `LOOM_CACHE_PATH` | Where the thumbnail/preview/video cache goes |
+| `LOOM_BIND` / `LOOM_PORT` | Local address and port for the web app |
+| `POSTGRES_PASSWORD` | Database password (installer generates it) |
+| `BETTER_AUTH_SECRET` | Secret for signing login sessions (installer generates it) |
+| `BETTER_AUTH_URL` / `TRUSTED_ORIGINS` | The public URL you'll use to reach Loom |
 
-## Daily Operations
+## Running it
 
 ```bash
-docker compose ps                       # service status
+docker compose ps                       # what's running
 docker compose logs -f loom-web         # web app logs
 docker compose logs -f loom-scanner     # scanner logs
 ./scripts/update.sh                     # pull, rebuild, migrate, restart
 ./scripts/backup-db.sh                  # back up the database
-./scripts/uninstall.sh                  # stop and remove containers
+./scripts/uninstall.sh                  # stop and remove the containers
 ```
 
-Rescans are manual by design (Settings → Scanner → Scan Now, as the Owner) — see [Architecture](docs/ARCHITECTURE.md) for why.
+Rescans are manual on purpose. As the Owner, go to Settings, then Scanner, then Scan Now. [How Loom works](docs/ARCHITECTURE.md) explains why.
 
-## Documentation
+## Docs
 
-- [Installation Guide](docs/INSTALLATION.md)
-- [Configuration Reference](docs/CONFIGURATION.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Reverse Proxy Setup](docs/REVERSE-PROXY.md)
+- [Installation](docs/INSTALLATION.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [How Loom works](docs/ARCHITECTURE.md)
+- [Reverse proxy](docs/REVERSE-PROXY.md)
 - [Upgrading](docs/UPGRADING.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 
-## Absolute Rules (Never Violated)
+## Rules Loom follows
 
-These are the design invariants Loom is built around, not aspirations:
+These are things the code will not do, on purpose:
 
-1. Loom never deletes original files — deletions go through a recoverable Trash.
-2. Loom never moves or renames existing folders automatically.
-3. Loom never reorganizes your filesystem's structure.
-4. Thumbnails, previews, and metadata are written only to the separate cache directory — never onto your original files' filesystem.
-5. Your filesystem is the single source of truth; the database is only an index of it.
-6. The application adapts to your existing folder structure — your files never adapt to the application.
+1. It never deletes your original files. Deletes go to a trash you can undo.
+2. It never moves or renames your existing folders on its own.
+3. It never reorganizes your folder structure.
+4. Thumbnails, previews, and metadata only go in the separate cache folder, never next to your files.
+5. Your filesystem is the truth. The database is just an index. If they disagree, the filesystem is right.
+6. Loom fits your folders. Your folders don't have to fit Loom.
 
 ## Contributing
 
-Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Please review [SECURITY.md](SECURITY.md) before reporting a vulnerability.
+See [CONTRIBUTING.md](CONTRIBUTING.md). For security bugs, read [SECURITY.md](SECURITY.md) first.
 
 ## License
 
-Loom is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). In short: you're free to use, modify, self-host, and share Loom for any **noncommercial** purpose — personal use, home labs, nonprofits, education, research. Commercial use (offering Loom, or a service built on it, for a fee) requires a separate agreement with the author. This makes Loom **source-available**, not OSI-approved open source — see the license for the exact terms.
+Loom uses the [PolyForm Noncommercial License 1.0.0](LICENSE). You can use, change, self-host, and share it for anything noncommercial: personal use, home labs, nonprofits, school, research. Charging money for Loom, or for a service built on it, needs a separate agreement with me. That makes Loom source-available, not OSI open source. The license has the exact wording.

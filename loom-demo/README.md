@@ -1,46 +1,31 @@
-# Loom — public demo build
+# Loom public demo
 
-A shareable, **fully fabricated** version of Loom — the same Next.js
-frontend, built with `NEXT_PUBLIC_DEMO_MODE=1`.
+A shareable, completely fake version of Loom. Same Next.js frontend, built with `NEXT_PUBLIC_DEMO_MODE=1`.
 
 ## What it is
 
 That flag pulls in [`web/lib/demo/`](../web/lib/demo/), which:
 
-- swaps the handful of server-side auth/setup checks for client-only
-  equivalents (there's no database or better-auth session to check against)
-- replaces `window.fetch` and `XMLHttpRequest` so every `/api/*` request is
-  answered from fabricated state held in the browser
-- registers a small Service Worker ([`web/public/demo-sw.js`](../web/public/demo-sw.js))
-  to serve real (generated) placeholder photos/videos for `<img>`/`<video>`/
-  download links — those never go through `fetch()`, so the page-level
-  patch alone can't reach them
+- swaps the few server-side auth and setup checks for client-only versions (there's no database or better-auth session to check)
+- replaces `window.fetch` and `XMLHttpRequest` so every `/api/*` request is answered from fake state in the browser
+- registers a small Service Worker ([`web/public/demo-sw.js`](../web/public/demo-sw.js)) to serve generated placeholder photos and videos for `<img>`, `<video>`, and download links, since those don't go through `fetch()` and the page-level patch can't see them
 
-**There is no backend.** `app/api/` is deleted entirely for this build (a
-static export can't include Route Handlers that use `headers()`/`cookies()`,
-which all of ours do). The build output is static HTML/JS/CSS — it cannot
-read or write anything on the host it's served from, and it never talks to
-a real database, filesystem, or authentication server.
+There is no backend. `app/api/` is removed for this build (a static export can't include Route Handlers that use `headers()` or `cookies()`, and all of ours do). The output is static HTML, JS, and CSS. It can't read or write anything on the host serving it, and it never talks to a real database, filesystem, or auth server.
 
-Per-visitor changes (renaming a file, moving something to trash, adding a
-user, editing permissions) persist in that browser's `localStorage`; the
-DEMO badge's popup has a **Reset demo** button.
+Changes a visitor makes (rename a file, move something to trash, add a user, edit permissions) are saved in that browser's `localStorage`. The DEMO badge popup has a **Reset demo** button.
 
-Login: any credentials work. There's a "Fill demo credentials" button on
-the login page that fills in `demo` / `demo`.
+Login: anything works. There's a "Fill demo credentials" button that fills in `demo` / `demo`.
 
 ## Build
 
 ```bash
-bash loom-demo/build.sh              # → loom-demo/dist/
-bash loom-demo/build.sh --regen-photos  # also regenerate placeholder photos first
+bash loom-demo/build.sh                  # -> loom-demo/dist/
+bash loom-demo/build.sh --regen-photos   # regenerate placeholder photos first
 ```
 
-`loom-demo/dist/` is gitignored — it's a build artifact. Rebuild with the
-same command after any frontend change. Placeholder videos
-(`web/public/demo-assets/videos/`) are generated separately, via ffmpeg in
-a throwaway container (they don't need Node/sharp, so keeping that out of
-`build.sh`'s normal path keeps it fast):
+`loom-demo/dist/` is gitignored. It's a build artifact. Run the same command again after any frontend change.
+
+Placeholder videos (`web/public/demo-assets/videos/`) are made separately with ffmpeg in a throwaway container. They don't need Node or sharp, so keeping that out of `build.sh` keeps it fast:
 
 ```bash
 cd web/public/demo-assets/videos
@@ -52,40 +37,48 @@ docker run --rm --user "$UID_GID" -v "$(pwd):/out" -w /out jrottenberg/ffmpeg:4.
 
 ## Serve
 
-It's a static SPA, so any static host works. To check locally:
+It's a static site, so any static host works. To check locally:
 
 ```bash
 npx serve loom-demo/dist
-# or:  cd loom-demo/dist && python3 -m http.server 4173
 ```
 
-For a production reverse proxy you only need static file serving with an
-SPA fallback. Example Caddy block (see [`Caddyfile.snippet`](./Caddyfile.snippet)):
+Heads up: `python3 -m http.server` won't work well here. The Next static export makes a `.html` file per route (`login.html`, `photos.html`, and so on) and the plain Python server won't map `/login` to `login.html`, so routes 404. `npx serve` mostly handles it. The Caddy and nginx configs below handle it properly.
+
+For a real proxy you need static file serving plus a couple of fallbacks. Example Caddy block (see [`Caddyfile.snippet`](./Caddyfile.snippet)):
 
 ```
 http://DEMO_DOMAIN {
     root * /path/to/loom/loom-demo/dist
     encode gzip
-    try_files {path} /index.html
+
+    @filesRoute {
+        path /files/*
+        not path /files/_.html
+        not path /files/_.txt
+    }
+    rewrite @filesRoute /files/_.html
+
+    try_files {path} {path}.html /index.html
     file_server
 }
 ```
 
-nginx equivalent:
+Why the two odd parts:
+
+- `try_files {path} {path}.html /index.html`: the `.html` step is what maps `/login` to `login.html`. Without it, every route falls back to `index.html` and you get the site root everywhere.
+- The `/files/*` rewrite: the file browser is one dynamic catch-all route, and a static export can only prerender one placeholder page for it (`/files/_.html`). Deep links like `/files/Photos/Vacation 2024` have to serve that page so the app can read the real path from the URL. Otherwise they fall back to the site root and bounce you to `/files`.
+
+nginx version of the same idea:
 
 ```nginx
 server {
     server_name DEMO_DOMAIN;
     root /path/to/loom/loom-demo/dist;
-    location / { try_files $uri /index.html; }
+
+    location /files/ { try_files $uri /files/_.html; }
+    location /       { try_files $uri $uri.html /index.html; }
 }
 ```
 
-**One thing that matters for either proxy**: `web/public/demo-sw.js` must
-be served at the site root (`/demo-sw.js`) with `Content-Type:
-application/javascript` (or `text/javascript`) — both Caddy's `file_server`
-and nginx's default static handling get this right automatically from the
-`.js` extension, so no special config is needed, but if you use a CDN or
-different static host, make sure it doesn't rewrite the file's path or
-strip its scope (Service Workers can only control pages at or below the
-path they're served from).
+One more thing for either proxy: `web/public/demo-sw.js` has to be served at the site root (`/demo-sw.js`) with a JavaScript content type. Caddy's `file_server` and nginx's default static handling both get this from the `.js` extension, so no special config. If you use a CDN or a different host, make sure it doesn't rewrite the file's path or change its scope. A Service Worker can only control pages at or below the path it's served from.
