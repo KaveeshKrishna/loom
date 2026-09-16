@@ -1,50 +1,29 @@
 # Configuration
 
-All config is environment variables in `.env` at the repo root. Docker Compose loads it (`env_file: .env` on each service). `.env.example` has the defaults, and the installer copies it to `.env`.
+All config is environment variables in .env at the repo root, which Docker Compose loads for each service. .env.example has the defaults, and the installer copies it to .env.
 
 ## Storage paths
 
-| Variable | Default | Required | What it's for |
-|---|---|---|---|
-| `LOOM_MEDIA_PATH` | `./data/media` | Yes, point it at your real files | Host folder mounted to `/media` in both containers. This is your file library. Loom reads it in place and only writes to its own `.LoomTrash/` and `.tmp-upload/` subfolders. |
-| `LOOM_CACHE_PATH` | `./data/cache` | Yes, pick somewhere with free space | Host folder mounted to `/cache`. Holds generated thumbnails, previews, and HLS segments. All derived, safe to delete. Loom rebuilds it on the next scan and generation pass. |
+LOOM_MEDIA_PATH is the host folder mounted to /media in both containers, this is your file library. It defaults to ./data/media but you should point it at your real files. Loom reads it in place and only writes to its own .LoomTrash/ and .tmp-upload/ subfolders.
+
+LOOM_CACHE_PATH is the host folder mounted to /cache, defaulting to ./data/cache. Pick somewhere with free space. It holds generated thumbnails, previews, and HLS segments, all derived and safe to delete, Loom rebuilds it on the next scan and generation pass.
 
 ## Network
 
-| Variable | Default | Required | What it's for |
-|---|---|---|---|
-| `LOOM_BIND` | `127.0.0.1` | No | Host address the web app's port binds to. Leave it on `127.0.0.1` unless Loom is the only thing on the host and you know what you're doing. Normally you reach Loom through a reverse proxy (see [REVERSE-PROXY.md](REVERSE-PROXY.md)), not by exposing the port. |
-| `LOOM_PORT` | `8085` | No | Host port for the web app. |
+LOOM_BIND is the host address the web app's port binds to, default 127.0.0.1. Leave it there unless Loom is the only thing on the host and you know what you're doing, normally you reach Loom through a reverse proxy (see [REVERSE-PROXY.md](REVERSE-PROXY.md)) rather than exposing the port directly. LOOM_PORT is the host port for the web app, default 8085.
 
 ## Database
 
-| Variable | Default | Required | What it's for |
-|---|---|---|---|
-| `POSTGRES_PASSWORD` | none | Yes | Password for the `loom` PostgreSQL user. The installer makes a random one. If you set it yourself, make it long and random. |
-| `DATABASE_URL` | built automatically in `compose.yml` from `POSTGRES_PASSWORD` | No | Only set this if you run outside Docker Compose, like against an external PostgreSQL. |
+POSTGRES_PASSWORD is the password for the loom PostgreSQL user, and it's required. The installer makes a random one, if you set it yourself make it long and random. DATABASE_URL is built automatically in compose.yml from POSTGRES_PASSWORD, you'd only set this yourself if running outside Docker Compose, against an external PostgreSQL for example.
 
 ## Login (better-auth)
 
-| Variable | Default | Required | What it's for |
-|---|---|---|---|
-| `BETTER_AUTH_SECRET` | none | Yes | Signs login sessions. The installer makes a random 48-byte value. Changing it logs everyone out. |
-| `BETTER_AUTH_URL` | `http://localhost:3000` | Yes in production | The public URL Loom is served at, like `https://loom.example.com`. Used to build auth callback URLs. |
-| `TRUSTED_ORIGINS` | empty | Recommended | Comma-separated list of origins allowed to make logged-in requests, like `https://loom.example.com,http://localhost:8085`. List every hostname and port you'll actually use. |
+BETTER_AUTH_SECRET signs login sessions and is required, the installer generates a random 48-byte value. Changing it logs everyone out. BETTER_AUTH_URL is the public URL Loom is served at, like https://loom.example.com, required in production, it's used to build auth callback URLs. TRUSTED_ORIGINS is a comma-separated list of origins allowed to make logged-in requests, like https://loom.example.com,http://localhost:8085, it's recommended and defaults to empty. List every hostname and port you'll actually use.
 
 ## Next.js
 
-| Variable | Default | Required | What it's for |
-|---|---|---|---|
-| `NODE_ENV` | `production` | No | Standard Node environment flag. |
-| `NEXT_TELEMETRY_DISABLED` | `1` | No | Turns off Next.js's anonymous telemetry. |
+NODE_ENV defaults to production, it's the standard Node environment flag. NEXT_TELEMETRY_DISABLED defaults to 1 and turns off Next.js's anonymous telemetry.
 
-## Advanced: container path overrides
+## Advanced, container path overrides
 
-These are read inside the containers. You normally wouldn't set them. They exist so the code isn't hardcoded to Docker's mount points, for people running Loom without Docker Compose.
-
-| Variable | Default | What it's for |
-|---|---|---|
-| `MEDIA_ROOT` | `/media` | Path to the media root inside the container. |
-| `CACHE_ROOT` | `/cache` | Path to the cache root inside the container. |
-
-Leave both unset in a normal Docker Compose setup.
+These are read inside the containers and you normally wouldn't set them, they exist so the code isn't hardcoded to Docker's mount points, for anyone running Loom outside Docker Compose. MEDIA_ROOT defaults to /media inside the container, CACHE_ROOT defaults to /cache. Leave both unset in a normal Docker Compose setup.

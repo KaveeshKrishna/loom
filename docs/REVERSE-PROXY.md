@@ -1,8 +1,8 @@
 # Reverse proxy
 
-Loom binds to `127.0.0.1:$LOOM_PORT` on the host by default (see [Configuration](CONFIGURATION.md)). It's not meant to face the internet directly. Put a reverse proxy in front of it for HTTPS and a real hostname.
+Loom binds to 127.0.0.1:$LOOM_PORT on the host by default (see [Configuration](CONFIGURATION.md)), it's not meant to face the internet directly. Put a reverse proxy in front of it for HTTPS and a real hostname.
 
-Whatever proxy you use, also set `BETTER_AUTH_URL` and `TRUSTED_ORIGINS` in `.env` to the public URL, then run `docker compose up -d` again.
+Whatever proxy you use, also set BETTER_AUTH_URL and TRUSTED_ORIGINS in .env to the public URL, then run docker compose up -d again.
 
 ## Caddy
 
@@ -47,7 +47,7 @@ server {
 
 ## Traefik (Docker labels)
 
-To have Traefik find Loom through Docker labels instead of a config file, add these to the `loom-web` service in `compose.yml`, and remove the `ports:` mapping since Traefik reaches it over the Docker network:
+To have Traefik find Loom through Docker labels instead of a config file, add these to the loom-web service in compose.yml, and remove the ports mapping since Traefik reaches it over the Docker network:
 
 ```yaml
     labels:
@@ -59,7 +59,7 @@ To have Traefik find Loom through Docker labels instead of a config file, add th
 
 ## Cloudflare Tunnel
 
-Handy if your server has no public IP you can reach (common with CGNAT and most home ISPs). `cloudflared` runs as its own process or container and makes an outbound-only tunnel. Point it at a local Caddy or nginx, not the container port, so proxy behavior (headers, timeouts) stays in one place.
+Handy if your server has no public IP you can reach, common with CGNAT and most home ISPs. cloudflared runs as its own process or container and makes an outbound-only tunnel. Point it at a local Caddy or nginx, not the container port, so proxy behavior like headers and timeouts stays in one place.
 
 ```yaml
 # /etc/cloudflared/config.yml
@@ -78,6 +78,4 @@ sudo systemctl restart cloudflared
 
 ## Big uploads and slow requests
 
-Two things to check with any proxy:
-- **No body size limit.** Large video uploads need `client_max_body_size 0;` in nginx, or the equivalent for your proxy.
-- **Long enough timeouts.** The first request for a region of a video can take a few seconds while HLS segments are made. A very short proxy timeout cuts that off. 60 seconds is a safe minimum.
+Two things worth checking with any proxy. First, no body size limit, large video uploads need client_max_body_size 0; in nginx, or the equivalent for your proxy. Second, long enough timeouts, the first request for a region of a video can take a few seconds while HLS segments are made, and a very short proxy timeout will cut that off, 60 seconds is a safe minimum.
