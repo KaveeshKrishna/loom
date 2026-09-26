@@ -1,24 +1,31 @@
 /**
- * POST /api/fs/copy  { sourcePaths: string[], destDir, action? }
- * Copies files and folders (recursively). Copies keep their modification
- * time and share thumbnails with the original.
+ * POST /api/fs/copy  { sourcePaths: string[], destDir, decisions?, defaultAction? }
+ *
+ * Starts a background copy and returns { jobId, bytesTotal, filesTotal } at
+ * once; progress arrives as live "job" events (and GET /api/fs/jobs/:id).
+ *
+ * Folders merge into same-named folders at the destination. Files that
+ * already exist follow `decisions` (conflict key → "skip" | "replace" |
+ * "keep_both", from POST /api/fs/conflicts), else `defaultAction` (default
+ * "skip"). Copies are crash-safe and keep modification times.
  */
 import { NextResponse } from "next/server";
-import { route, requireUser, readJson, badRequest } from "@/lib/http";
+import { route, requireUser, readJson } from "@/lib/http";
 import { getAcl } from "@/lib/acl";
-import { copyItem, parseConflictAction } from "@/lib/file-ops";
+import { validateTransfer, parseFileAction, parseDecisions } from "@/lib/transfer";
+import { startCopyJob } from "@/lib/copy-jobs";
 
 export const POST = route(async (req) => {
   const user = await requireUser();
-  const body = await readJson<{ sourcePaths?: unknown; destDir?: string; action?: string }>(req);
-  if (!Array.isArray(body.sourcePaths) || body.sourcePaths.length === 0 || body.destDir == null) {
-    throw badRequest("sourcePaths and destDir are required");
-  }
+  const body = await readJson<{ sourcePaths?: unknown; destDir?: unknown; decisions?: unknown; defaultAction?: unknown; action?: unknown }>(req);
   const acl = await getAcl(user);
-  const onConflict = parseConflictAction(body.action);
-  const results = [];
-  for (const src of body.sourcePaths.slice(0, 5000)) {
-    results.push(await copyItem(user, acl, { srcRel: String(src), destDirRel: body.destDir, onConflict }));
-  }
-  return NextResponse.json({ results });
+  const { destDir, sources } = await validateTransfer(acl, body.sourcePaths, body.destDir);
+  const job = await startCopyJob(user, acl, {
+    sources,
+    destDir,
+    decisions: parseDecisions(body.decisions),
+    defaultAction: parseFileAction(body.defaultAction ?? body.action),
+  });
+  return NextResponse.json(job, { status: 202 });
 });
+

@@ -19,6 +19,7 @@
 import path from "path";
 import { badRequest } from "./http";
 import { resolveAndValidate, assertNotInternalPath } from "./path-security";
+import { isLoomTempName } from "./fs-journal";
 
 export const INTERNAL_NAMES = new Set([".LoomTrash", ".tmp-upload"]);
 
@@ -49,7 +50,7 @@ export function validateName(input: unknown): string {
   if (name.includes("/")) throw badRequest("Names can't contain /");
   if (CONTROL_CHARS.test(name)) throw badRequest("Name contains invalid characters");
   if (Buffer.byteLength(name, "utf8") > 255) throw badRequest("Name is too long");
-  if (INTERNAL_NAMES.has(name)) throw badRequest("That name is reserved for Loom");
+  if (INTERNAL_NAMES.has(name) || isLoomTempName(name)) throw badRequest("That name is reserved for Loom");
   return name;
 }
 

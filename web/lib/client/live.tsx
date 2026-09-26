@@ -28,6 +28,31 @@ export function emitDirChange(dirs: string[], nodeIds: string[] = [], reason?: s
   }
 }
 
+// ─── background jobs (e.g. copies) ───────────────────────────────────────────
+
+export interface JobEvent {
+  id: string;
+  kind: string;
+  status: "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED" | string;
+  progress?: number;
+  bytesDone?: number;
+  bytesTotal?: number;
+  filesDone?: number;
+  filesTotal?: number;
+  summary?: { done: number; skipped: number; failed: number; errors: { path: string; error: string }[] };
+  error?: string;
+}
+
+const jobListeners = new Set<(ev: JobEvent) => void>();
+
+/** Listen for background job progress. Returns an unsubscribe function. */
+export function onJobEvent(fn: (ev: JobEvent) => void): () => void {
+  jobListeners.add(fn);
+  return () => {
+    jobListeners.delete(fn);
+  };
+}
+
 const LiveContext = createContext<{ connected: boolean }>({ connected: false });
 
 export function LiveProvider({ children }: { children: ReactNode }) {
@@ -54,6 +79,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         try {
           const ev = JSON.parse(msg.data);
           if (ev.type === "changed") emitDirChange(ev.dirs ?? ["*"], ev.nodeIds ?? [], ev.reason);
+          else if (ev.type === "job" && ev.job) jobListeners.forEach((l) => l(ev.job));
         } catch {
           /* ignore malformed */
         }

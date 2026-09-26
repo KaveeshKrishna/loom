@@ -9,7 +9,7 @@ Try the [live demo](https://loomdemo.kaveeshkrishna.in). It's a fake version wit
 ## What it does
 
 - Browse your files in a grid or a list that stays fast with tens of thousands of files in a folder. Sort by name, date, size or type, filter by kind (photos, videos, audio, documents, folders), and open a details panel with EXIF (camera, date taken, location), video codec and resolution, and recent activity.
-- Upload anything, any size. Drag files or whole folders onto the page, or use the New button. Big videos are sent in verified chunks, so they work behind Cloudflare and other proxies, resume after a dropped connection or a closed tab, and never fill the server's memory. An upload counts as done the moment its last byte is safely stored. Thumbnails and previews appear a few seconds later, on their own.
+- Upload anything, any size. Drag files or whole folders onto the page, or use the New button. Big videos are sent in verified chunks, so they work behind Cloudflare and other proxies, resume after a dropped connection, a closed tab or a power cut, and never fill the server's memory. Nothing half-finished ever shows up in your folders. An upload counts as done the moment its last byte is safely stored. Thumbnails and previews appear a few seconds later, on their own.
 - Manage files like a desktop app:
   - Rename inline (F2), make folders and text files.
   - Cut, copy and paste, or Move to… and Copy to… with a folder picker.
@@ -17,7 +17,7 @@ Try the [live demo](https://loomdemo.kaveeshkrishna.in). It's a fake version wit
   - Select many items and move, copy, star, download or delete them together.
   - Keyboard shortcuts throughout.
   - Undo for moves, renames and deletes.
-  - If a name is already taken, Loom asks: keep both, replace or skip. Replace never destroys anything, because the old item goes to Trash.
+  - If a name is already taken, Loom asks, like Windows: replace, skip or keep both, with "do this for all". Folders merge. Replace never destroys anything, because the old item goes to Trash.
 - Download single files directly, or any selection of files and folders as one ZIP, streamed on the fly with no size limit.
 - Share links. Send anyone a link to a file or folder, no account needed. Links can have an expiry, a password, and a view-only mode, and you can revoke them at any time. Sharing is off until the Owner turns it on.
 - View and edit:

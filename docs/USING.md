@@ -8,8 +8,8 @@ Drag files, or whole folders, onto any folder view. You can also use New → Upl
 
 - Progress. The upload panel in the corner shows progress, speed, and time remaining.
 - Done means stored. A file shows as Uploaded as soon as every byte is safely stored. Its thumbnail appears a few seconds later ("preview generating in background").
-- Interruptions. If your connection drops, uploads retry on their own. If you close the tab, choose the same files again within 24 hours to resume where they stopped.
-- Name clashes. An upload never overwrites anything. If a file with the same name exists, the new one becomes `name (1).ext`.
+- Interruptions. If your connection drops, uploads retry on their own. If you close the tab, or the server loses power, the upload panel shows the unfinished uploads next time. Choose the same files again (in the same folder) within 24 hours to resume where they stopped, or click Discard to free the space. Unfinished files never appear in your folders.
+- Files that already exist. Before uploading, Loom asks what to do with each file that's already there: Replace (the old one goes to Trash), Skip, or Keep both (the new one becomes `name (1).ext`). Tick "Do this for the other N conflicts" to answer them all at once. It shows both files' size and date, and says when they're probably identical. So after an interrupted folder upload, pick the folder again and choose Skip for all: only what's missing gets uploaded.
 - Minimizing. You can hide the panel. A small pill keeps showing progress, and clicking it brings the panel back.
 
 ## Selecting and organizing
@@ -18,7 +18,8 @@ Drag files, or whole folders, onto any folder view. You can also use New → Upl
 - Bulk actions. With items selected, the bar at the top can Download (as a ZIP), Move to, Copy to, Star, or Trash them.
 - Right-click or ⋮ on anything for every action: open, download, rename, move, copy, cut/copy/paste, star, pin to the sidebar, details, and move to Trash.
 - Dragging. Drag items onto a folder, a breadcrumb, a pinned folder, or All Files to move them. Hold Alt or Ctrl to copy instead.
-- Name clashes when moving or copying. Loom asks whether to keep both, replace, or skip. Replace moves the existing item to Trash, so it can still be restored.
+- Name clashes when moving or copying. Folders with the same name merge, like in Windows. For each file that already exists, Loom asks: Replace (the existing one goes to Trash, so it can be restored), Skip, or Keep both, with "Do this for the other N conflicts".
+- Copying big folders runs in the background with a progress bar and a Cancel button. Cancelling keeps the files already copied; the one in progress is discarded, never left half-copied.
 - Undo. Most actions show an Undo button for a few seconds.
 
 ## Keyboard shortcuts

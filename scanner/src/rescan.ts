@@ -11,7 +11,7 @@
  * right there. If the media root looks unmounted (empty while the index is
  * not) the scan stops before removing anything.
  */
-import { readdir, stat, access } from "fs/promises";
+import { readdir, stat, access, readFile, lstat, rm } from "fs/promises";
 import { join } from "path";
 import { constants, type Dirent } from "fs";
 import mime from "mime-types";
@@ -21,6 +21,8 @@ import {
   log,
   MEDIA_ROOT,
   isIgnoredName,
+  isLoomTempName,
+  JOURNAL_DIR,
   sourceVersionOf,
   setStatus,
   publishChange,
@@ -47,6 +49,37 @@ function likePrefix(s: string) {
 }
 
 /**
+ * Temp paths the web app is still writing (listed in its journal). Anything
+ * else with a Loom temp name is a leftover from an interrupted operation.
+ */
+async function journalTemps(): Promise<Set<string>> {
+  const live = new Set<string>();
+  for (const f of await readdir(JOURNAL_DIR).catch(() => [] as string[])) {
+    try {
+      const e = JSON.parse(await readFile(join(JOURNAL_DIR, f), "utf8"));
+      if (typeof e.tempAbs === "string") live.add(e.tempAbs);
+      if (typeof e.finalAbs === "string") live.add(e.finalAbs);
+    } catch {
+      /* ignore */
+    }
+  }
+  return live;
+}
+
+/**
+ * Remove an unfinished temp file/folder left behind by an interrupted copy,
+ * edit or rename — never one that's in use (in the journal, or touched in the
+ * last hour). These are never shown in Loom and never indexed.
+ */
+async function discardStaleTemp(abs: string, live: Set<string>) {
+  if (live.has(abs)) return;
+  const st = await lstat(abs).catch(() => null);
+  if (!st || Date.now() - st.mtimeMs < 60 * 60 * 1000) return;
+  await rm(abs, { recursive: true, force: true }).catch(() => {});
+  log("INFO", `Removed an unfinished temporary file left by an interrupted operation: ${abs}`);
+}
+
+/**
  * Fix rows whose parentPath doesn't match their relativePath. Only rows
  * written by an older Loom (e.g. while rolled back after an update) can be
  * wrong: the column didn't exist then, so they got the default ''. Folders
@@ -63,6 +96,7 @@ export async function repairParentPaths(): Promise<void> {
 export async function runFullRescan(jobId: string): Promise<void> {
   log("INFO", "FULL_RESCAN started", { jobId });
   await repairParentPaths();
+  const liveTemps = await journalTemps();
   await setStatus("scanner_status", "scanning");
   const stats: Stats = { dirsChecked: 0, filesChecked: 0, filesAdded: 0, filesChanged: 0, removed: 0, queued: 0, errors: 0 };
   const changedDirs = new Set<string>();
@@ -146,6 +180,10 @@ export async function runFullRescan(jobId: string): Promise<void> {
       const subdirs: string[] = [];
 
       for (const entry of entries) {
+        if (isLoomTempName(entry.name)) {
+          await discardStaleTemp(join(dirAbs, entry.name), liveTemps);
+          continue;
+        }
         if (isIgnoredName(entry.name)) continue;
         // Symlinks are never followed: they could point outside the media folder.
         if (entry.isSymbolicLink()) continue;

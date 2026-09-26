@@ -2,6 +2,20 @@
 
 What changed in each version of Loom, newest first. Update with `./scripts/update.sh`, see [docs/UPGRADING.md](docs/UPGRADING.md).
 
+## 2.1.0
+
+Name clashes are handled like in Windows, and Loom now survives power cuts in the middle of anything.
+
+- Uploading, copying or moving files that already exist asks what to do with each: Replace (the old one goes to Trash), Skip, or Keep both (numbered name), with "Do this for the other N conflicts". It shows both files' size and date and flags ones that are probably identical.
+- Folders with the same name merge instead of clashing.
+- After an interrupted folder upload, pick the folder again and choose Skip for all: only what's missing is uploaded, no more `photo (1).jpg` duplicates.
+- Unfinished uploads are listed in the upload panel when you open Loom, with Discard. Settings → Storage shows the space they use, with Clean up. Uploads also resume from another browser.
+- Copies run in the background with progress and Cancel, so big copies no longer fail behind proxies with time limits.
+- Crash safety: copies and text edits are written to hidden temp files and only put in place when complete. A journal lets Loom finish or undo interrupted uploads, copies and edits on the next start. A rescan also removes old leftovers. Nothing half-written ever shows up in your folders.
+- Restoring several items from Trash now asks about every conflict, not just the first.
+
+No manual steps: update with `./scripts/update.sh`. There's no database migration in this release.
+
 ## 2.0.0
 
 A big release: fast uploads, a new file browser, editing, share links, and a safe updater. Your files and settings carry over. The database is backed up and upgraded automatically.

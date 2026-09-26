@@ -23,6 +23,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { emitDirChange, useChangeReason } from "@/lib/client/live";
 import { parentOf } from "@/lib/client/api";
+import { resolveConflicts, type ConflictInfo } from "@/components/files/CollisionDialog";
+import { toast } from "@/components/ui/Toaster";
 
 export type UploadStatus = "pending" | "uploading" | "finalizing" | "done" | "error" | "cancelled";
 
@@ -44,6 +46,18 @@ export interface UploadEntry {
   processing?: boolean;
   nodeId?: string;
   resumed?: boolean;
+  /** What to do if the name is taken when it finishes (asked beforehand). */
+  conflict?: "replace" | "keep_both";
+  replaced?: boolean;
+}
+
+/** An upload the server still has partial data for (e.g. after a crash or a closed tab). */
+export interface UnfinishedUpload {
+  id: string;
+  destDir: string;
+  relativePath: string;
+  size: number;
+  received: number;
 }
 
 interface UploadActions {
@@ -53,11 +67,14 @@ interface UploadActions {
   dismissUpload: (id: string) => void;
   clearCompleted: () => void;
   setVisible: (v: boolean) => void;
+  /** Throw away the partial data of every unfinished upload (frees the disk space now). */
+  discardUnfinished: () => Promise<void>;
 }
 
 interface UploadState {
   uploads: UploadEntry[];
   isVisible: boolean;
+  unfinished: UnfinishedUpload[];
 }
 
 const ActionsContext = createContext<UploadActions | null>(null);
@@ -66,6 +83,10 @@ const StateContext = createContext<UploadState | null>(null);
 const MAX_PARALLEL = 3;
 const MAX_RETRIES = 8;
 const RESUME_KEY = "loom-upload-resume";
+
+function sessionKey(destDir: string, relativePath: string, size: number) {
+  return `${destDir}\n${relativePath}\n${size}`;
+}
 
 function resumeKey(e: { destDir: string; relativePath: string; file: File }) {
   return `${e.destDir}|${e.relativePath}|${e.file.size}|${e.file.lastModified}`;
@@ -167,6 +188,10 @@ function isRetryable(err: unknown): boolean {
 export function UploadProvider({ children }: { children: ReactNode }) {
   const [uploads, setUploads] = useState<UploadEntry[]>([]);
   const [isVisible, setVisible] = useState(false);
+  const [unfinished, setUnfinished] = useState<UnfinishedUpload[]>([]);
+  /** Server-side sessions by destDir + path + size, so a re-picked file resumes even without local storage. */
+  const serverSessions = useRef(new Map<string, string>());
+  const activeSessions = useRef(new Set<string>());
   const queue = useRef<string[]>([]);
   const entries = useRef(new Map<string, UploadEntry>());
   const controllers = useRef(new Map<string, AbortController>());
@@ -201,11 +226,12 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       const { file } = entry;
       const key = resumeKey(entry);
       update(id, { status: "uploading", error: undefined });
+      let activeSid: string | null = null;
 
       try {
         // Resume an earlier session for this exact file, if the server still has it.
         let session: { id: string; chunkSize: number; received: number } | null = null;
-        const previous = loadResumeMap()[key];
+        const previous = loadResumeMap()[key] ?? serverSessions.current.get(sessionKey(entry.destDir, entry.relativePath, file.size));
         if (previous) {
           try {
             const s = await jsonRequest(`/api/upload/sessions/${previous}`, { method: "GET" }, ctrl.signal);
@@ -234,6 +260,11 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           session = { id: String(s.id), chunkSize: Number(s.chunkSize), received: 0 };
           saveResume(key, session.id);
         }
+        const sid = session.id;
+        activeSid = sid;
+        activeSessions.current.add(sid);
+        setUnfinished((prev) => prev.filter((u) => u.id !== sid));
+        const conflictQs = entry.conflict ? `&conflict=${entry.conflict}` : "";
 
         let offset = session.received;
         let retries = 0;
@@ -250,7 +281,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
             const sha = await sha256Hex(buf);
             const chunkStart = offset;
             const resp = await putChunk(
-              `/api/upload/sessions/${session.id}?offset=${offset}${final ? "&final=1" : ""}`,
+              `/api/upload/sessions/${session.id}?offset=${offset}${final ? `&final=1${conflictQs}` : ""}`,
               buf,
               sha,
               ctrl.signal,
@@ -280,7 +311,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
             } else {
               offset = Number(resp.received);
               if (final && offset >= file.size) {
-                result = await jsonRequest(`/api/upload/sessions/${session.id}/complete`, { method: "POST" }, ctrl.signal);
+                result = await jsonRequest(`/api/upload/sessions/${session.id}/complete?${conflictQs.slice(1)}`, { method: "POST" }, ctrl.signal);
               }
             }
           } catch (err) {
@@ -317,6 +348,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           bytesSent: file.size,
           finalPath: String(result.path),
           renamed: Boolean(result.renamed),
+          replaced: Boolean(result.replaced),
           processing: Boolean(result.processing),
           nodeId: result.nodeId ? String(result.nodeId) : undefined,
           error: undefined,
@@ -330,6 +362,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         }
       } finally {
         controllers.current.delete(id);
+        if (activeSid) activeSessions.current.delete(activeSid);
       }
     },
     [update, announce]
@@ -348,26 +381,99 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     }
   }, [runOne]);
 
+  const refreshUnfinished = useCallback(async () => {
+    try {
+      const r = await fetch("/api/upload/sessions", { credentials: "same-origin" });
+      if (!r.ok) return [];
+      const { sessions } = (await r.json()) as { sessions: UnfinishedUpload[] };
+      serverSessions.current = new Map(sessions.map((u) => [sessionKey(u.destDir, u.relativePath, u.size), u.id]));
+      const idle = sessions.filter((u) => !activeSessions.current.has(u.id));
+      setUnfinished(idle);
+      return idle;
+    } catch {
+      return []; // offline: nothing to show
+    }
+  }, []);
+
+  // After a crash or a closed tab, show what's unfinished so it can be resumed or discarded.
+  useEffect(() => {
+    refreshUnfinished().then((list) => {
+      if (list.length) setVisible(true);
+    });
+  }, [refreshUnfinished]);
+
+  const discardUnfinished = useCallback(async () => {
+    const list = unfinished;
+    setUnfinished([]);
+    await Promise.all(list.map((u) => fetch(`/api/upload/sessions/${u.id}`, { method: "DELETE", credentials: "same-origin" }).catch(() => {})));
+    const map = loadResumeMap();
+    const gone = new Set(list.map((u) => u.id));
+    for (const [k, v] of Object.entries(map)) if (gone.has(v)) saveResume(k, null);
+    serverSessions.current = new Map([...serverSessions.current].filter(([, id]) => !gone.has(id)));
+  }, [unfinished]);
+
   const enqueueFiles = useCallback(
     (files: { file: File; relativePath: string }[], destDir: string) => {
       if (files.length === 0) return;
-      const added: UploadEntry[] = files.map((f) => ({
-        id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2),
-        file: f.file,
-        relativePath: f.relativePath || f.file.name,
-        destDir,
-        status: "pending",
-        progress: 0,
-        bytesSent: 0,
-        speed: 0,
-      }));
-      for (const e of added) entries.current.set(e.id, e);
-      setUploads((prev) => [...prev, ...added]);
-      queue.current.push(...added.map((e) => e.id));
-      setVisible(true);
-      pump();
+      void (async () => {
+        // Ask first about files that already exist there (Replace / Skip /
+        // Keep both, "do this for all"). If the check itself fails, upload
+        // anyway: the server never overwrites, it adds a number instead.
+        const list = files.map((f) => ({ ...f, relativePath: f.relativePath || f.file.name }));
+        let decisions: Record<string, "skip" | "replace" | "keep_both"> = {};
+        let fallback: "replace" | "keep_both" = "keep_both";
+        try {
+          await refreshUnfinished();
+          const conflicts: ConflictInfo[] = [];
+          for (let i = 0; i < list.length; i += 5000) {
+            const r = await fetch("/api/fs/conflicts", {
+              method: "POST",
+              credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                op: "upload",
+                destDir,
+                files: list.slice(i, i + 5000).map((f) => ({ path: f.relativePath, size: f.file.size, lastModified: f.file.lastModified })),
+              }),
+            });
+            if (!r.ok) throw new Error(String(r.status));
+            conflicts.push(...((await r.json()) as { conflicts: ConflictInfo[] }).conflicts);
+          }
+          if (conflicts.length) {
+            const res = await resolveConflicts(conflicts, destDir ? destDir.split("/").pop()! : "Home");
+            if (!res) return; // cancelled: upload nothing
+            decisions = res.decisions;
+            if (res.defaultAction === "replace") fallback = "replace";
+          }
+        } catch {
+          /* see above */
+        }
+        const chosen = list.filter((f) => decisions[f.relativePath] !== "skip");
+        const skipped = list.length - chosen.length;
+        if (skipped) toast.info(`Skipped ${skipped} file${skipped === 1 ? "" : "s"} that already exist${skipped === 1 ? "s" : ""}.`);
+        if (chosen.length === 0) return;
+        const added: UploadEntry[] = chosen.map((f) => {
+          const d = decisions[f.relativePath];
+          return {
+            id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+            file: f.file,
+            relativePath: f.relativePath,
+            destDir,
+            status: "pending",
+            progress: 0,
+            bytesSent: 0,
+            speed: 0,
+            conflict: d === "replace" || d === "keep_both" ? d : fallback,
+          };
+        });
+        for (const e of added) entries.current.set(e.id, e);
+        setUploads((prev) => [...prev, ...added]);
+        queue.current.push(...added.map((e) => e.id));
+        setVisible(true);
+        pump();
+      })();
     },
-    [pump]
+    [pump, refreshUnfinished]
   );
 
   const cancelUpload = useCallback((id: string) => {
@@ -429,10 +535,10 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   }, [busy]);
 
   const actions = useMemo<UploadActions>(
-    () => ({ enqueueFiles, cancelUpload, retryUpload, dismissUpload, clearCompleted, setVisible }),
-    [enqueueFiles, cancelUpload, retryUpload, dismissUpload, clearCompleted]
+    () => ({ enqueueFiles, cancelUpload, retryUpload, dismissUpload, clearCompleted, setVisible, discardUnfinished }),
+    [enqueueFiles, cancelUpload, retryUpload, dismissUpload, clearCompleted, discardUnfinished]
   );
-  const state = useMemo<UploadState>(() => ({ uploads, isVisible }), [uploads, isVisible]);
+  const state = useMemo<UploadState>(() => ({ uploads, isVisible, unfinished }), [uploads, isVisible, unfinished]);
 
   return (
     <ActionsContext.Provider value={actions}>

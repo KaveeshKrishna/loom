@@ -5,6 +5,8 @@
 import { useEffect, useState } from "react";
 import { HardDrive, Loader2 } from "lucide-react";
 import { formatBytes } from "@/lib/utils";
+import { api } from "@/lib/client/api";
+import { toast } from "@/components/ui/Toaster";
 
 interface Disk {
   total: number;
@@ -16,6 +18,7 @@ interface Storage {
   cache: Disk | null;
   breakdown?: Record<string, { bytes: string; files: number }>;
   trashBytes?: string;
+  unfinishedUploads?: { count: number; bytes: string };
 }
 
 const LABELS: Record<string, { label: string; color: string }> = {
@@ -47,14 +50,51 @@ function DiskCard({ title, disk, note }: { title: string; disk: Disk | null; not
   );
 }
 
+function UnfinishedUploads({ info, onChange }: { info: { count: number; bytes: string }; onChange: () => void }) {
+  const [busy, setBusy] = useState(false);
+  if (!info.count) return null;
+  return (
+    <div className="bg-[hsl(var(--card))] border rounded-xl p-4 flex items-start gap-3">
+      <div className="flex-1">
+        <p className="text-sm font-medium">
+          Unfinished uploads · {info.count} ({formatBytes(info.bytes)})
+        </p>
+        <p className="text-xs text-[hsl(var(--muted-foreground))] mt-1">
+          Partial data from uploads that stopped (closed tab, lost connection, power cut). It&apos;s kept hidden so uploads can resume, never shown in
+          your folders, and deleted automatically after 24 hours. Clean up removes the ones nobody has touched for 10 minutes.
+        </p>
+      </div>
+      <button
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            const r = await api<{ removed: number; bytes: number }>("/api/upload/sessions?stale=1", { method: "DELETE" });
+            toast.success(`Removed ${r.removed} unfinished upload${r.removed === 1 ? "" : "s"} (${formatBytes(r.bytes)})`);
+            onChange();
+          } catch (e) {
+            toast.error((e as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="shrink-0 text-sm px-3 py-1.5 rounded-md border hover:bg-[hsl(var(--accent))] disabled:opacity-50"
+      >
+        Clean up
+      </button>
+    </div>
+  );
+}
+
 export function StoragePanel() {
   const [s, setS] = useState<Storage | null>(null);
-  useEffect(() => {
-    fetch("/api/storage")
+  const load = () => {
+    fetch("/api/storage", { cache: "no-store" })
       .then((r) => r.json())
       .then(setS)
       .catch(() => {});
-  }, []);
+  };
+  useEffect(load, []);
   if (!s) return <Loader2 className="animate-spin text-[hsl(var(--muted-foreground))]" />;
   const entries = Object.entries(s.breakdown ?? {}).sort((a, b) => Number(b[1].bytes) - Number(a[1].bytes));
   const total = entries.reduce((acc, [, v]) => acc + Number(v.bytes), 0);
@@ -66,6 +106,7 @@ export function StoragePanel() {
       </div>
       <DiskCard title="Media drive" disk={s.media} note="your files (LOOM_MEDIA_PATH)" />
       <DiskCard title="Cache drive" disk={s.cache} note="thumbnails, previews and converted video (LOOM_CACHE_PATH)" />
+      {s.unfinishedUploads && <UnfinishedUploads info={s.unfinishedUploads} onChange={load} />}
       {entries.length > 0 && (
         <div className="bg-[hsl(var(--card))] border rounded-xl p-4">
           <p className="text-sm font-medium mb-3">Library by type · {formatBytes(total)}</p>
