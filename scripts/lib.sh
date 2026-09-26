@@ -20,7 +20,8 @@ compose_cmd() {
 # Read a KEY=value from .env without sourcing it (values may contain $ etc.)
 env_get() {
   [ -f .env ] || return 0
-  grep -E "^$1=" .env | tail -n1 | cut -d= -f2-
+  # A missing key is normal (most are optional): print nothing, succeed.
+  { grep -E "^$1=" .env || true; } | tail -n1 | cut -d= -f2-
 }
 
 # Wait until a service reports healthy (or running, if it has no
