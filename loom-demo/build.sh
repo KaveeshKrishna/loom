@@ -48,6 +48,7 @@ echo "-> Applying demo file swaps (production web/ is never touched)"
 rm -rf app/api
 rm -rf "app/(auth)/setup"
 rm -rf app/s   # public share-link pages need a real server
+rm -f instrumentation.ts   # startup crash recovery needs a real server
 cp lib/demo/swap/page.tsx app/page.tsx
 cp lib/demo/swap/login-page.tsx "app/(auth)/login/page.tsx"
 cp lib/demo/swap/LoginForm.tsx "app/(auth)/login/LoginForm.tsx"

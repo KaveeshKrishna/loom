@@ -14,7 +14,6 @@
  */
 
 import fs from "fs/promises";
-import { constants as fsConstants } from "fs";
 import path from "path";
 import { randomUUID } from "node:crypto";
 import type { FileNode, Prisma } from "@prisma/client";
@@ -31,6 +30,7 @@ import {
   joinRel,
   isSameOrDescendant,
   likeEscape,
+  INTERNAL_NAMES,
 } from "./fs-guard";
 import {
   ensureDirectoryNodes,
@@ -42,6 +42,10 @@ import {
 } from "./node-index";
 import { publishChange } from "./events";
 import { initFs } from "./fs-operations";
+import { createReadStream, createWriteStream, constants as fsConstants } from "fs";
+import { Transform } from "stream";
+import { pipeline } from "stream/promises";
+import { beginTemp, fsyncDir, tempName, isLoomTempName } from "./fs-journal";
 import { HttpError, badRequest, forbidden, notFound, type SessionUser } from "./http";
 
 export type ConflictAction = "ask" | "skip" | "replace" | "keep_both";
@@ -68,7 +72,7 @@ export function parseConflictAction(v: unknown, fallback: ConflictAction = "ask"
 
 // ─── low-level helpers ───────────────────────────────────────────────────────
 
-async function lstatOrNull(abs: string) {
+export async function lstatOrNull(abs: string) {
   try {
     return await fs.lstat(abs);
   } catch (err) {
@@ -78,7 +82,7 @@ async function lstatOrNull(abs: string) {
 }
 
 /** Is `a` physically the same file as `b` (e.g. case-only rename on exFAT)? */
-async function sameFile(a: string, b: string): Promise<boolean> {
+export async function sameFile(a: string, b: string): Promise<boolean> {
   const [sa, sb] = await Promise.all([lstatOrNull(a), lstatOrNull(b)]);
   return !!sa && !!sb && sa.ino === sb.ino && sa.dev === sb.dev && sa.ino !== 0;
 }
@@ -95,19 +99,103 @@ export async function uniqueName(dirAbs: string, name: string, isDir: boolean): 
   }
 }
 
-/** rename(2), falling back to copy + delete when crossing filesystems. */
+/** rename(2), falling back to a crash-safe copy + delete when crossing filesystems. */
 async function moveOnDisk(srcAbs: string, destAbs: string): Promise<void> {
   try {
     await fs.rename(srcAbs, destAbs);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw err;
-    await fs.cp(srcAbs, destAbs, {
-      recursive: true,
-      errorOnExist: true,
-      force: false,
-      preserveTimestamps: true,
-    });
+    const st = await fs.lstat(srcAbs);
+    await copyIntoPlace(srcAbs, path.dirname(destAbs), path.basename(destAbs), st.isDirectory());
     await fs.rm(srcAbs, { recursive: true, force: true });
+  }
+}
+
+// ─── crash-safe copying ──────────────────────────────────────────────────────
+//
+// Copies are written to a hidden ".loom-tmp-…" name next to the destination
+// (journaled, see fs-journal.ts) and only renamed to their real name once
+// every byte is on disk. If the power goes out mid-copy, nothing half-copied
+// ever appears in the library, and the temp file is removed on the next start.
+
+export type ProgressFn = (bytes: number, files: number) => void;
+
+/** Copy one file's data to `destAbs` (which must not exist), flush it, keep its times. */
+async function copyFileData(srcAbs: string, destAbs: string, onProgress?: ProgressFn) {
+  const st = await fs.stat(srcAbs);
+  const meter = new Transform({
+    transform(chunk: Buffer, _enc, cb) {
+      onProgress?.(chunk.length, 0);
+      cb(null, chunk);
+    },
+  });
+  await pipeline(createReadStream(srcAbs), meter, createWriteStream(destAbs, { flags: "wx", mode: st.mode & 0o777 }));
+  const fh = await fs.open(destAbs, "r+");
+  try {
+    await fh.datasync();
+  } finally {
+    await fh.close();
+  }
+  await fs.utimes(destAbs, st.atime, st.mtime);
+  onProgress?.(0, 1);
+}
+
+/** Copy a folder tree into `destAbs` (created here). Symlinks and Loom temp files are skipped. */
+async function copyTreeData(srcAbs: string, destAbs: string, onProgress?: ProgressFn) {
+  const st = await fs.stat(srcAbs);
+  await fs.mkdir(destAbs, { mode: st.mode & 0o777 });
+  for (const e of await fs.readdir(srcAbs, { withFileTypes: true })) {
+    if (isLoomTempName(e.name) || INTERNAL_NAMES.has(e.name)) continue;
+    const s = path.join(srcAbs, e.name);
+    const d = path.join(destAbs, e.name);
+    if (e.isDirectory()) await copyTreeData(s, d, onProgress);
+    else if (e.isFile()) await copyFileData(s, d, onProgress);
+  }
+  await fs.utimes(destAbs, st.atime, st.mtime).catch(() => {});
+}
+
+/**
+ * Move a finished temp file/folder to `finalAbs` without ever overwriting
+ * anything. Files use link()+unlink(), which fails atomically if the name is
+ * taken; filesystems without hard links (exFAT) fall back to check-then-rename
+ * under the caller's path lock.
+ */
+async function placeNoClobber(tempAbs: string, finalAbs: string, isDir: boolean) {
+  const taken = () => Object.assign(new Error("Destination already exists"), { code: "EEXIST" });
+  if (!isDir) {
+    try {
+      await fs.link(tempAbs, finalAbs);
+      await fs.unlink(tempAbs);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "EEXIST") throw err;
+      if (!["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EMLINK", "EXDEV", "EINVAL"].includes(code ?? "")) throw err;
+    }
+  }
+  if (await lstatOrNull(finalAbs)) throw taken();
+  await fs.rename(tempAbs, finalAbs);
+}
+
+/**
+ * Crash-safe copy of a file or folder to `destDirAbs/name` (which must not
+ * exist yet). Returns the final absolute path.
+ */
+export async function copyIntoPlace(srcAbs: string, destDirAbs: string, name: string, isDir: boolean, onProgress?: ProgressFn) {
+  const tempAbs = path.join(destDirAbs, tempName());
+  const finalAbs = path.join(destDirAbs, name);
+  const journal = await beginTemp(tempAbs);
+  try {
+    if (isDir) await copyTreeData(srcAbs, tempAbs, onProgress);
+    else await copyFileData(srcAbs, tempAbs, onProgress);
+    await placeNoClobber(tempAbs, finalAbs, isDir);
+    await fsyncDir(destDirAbs);
+    return finalAbs;
+  } catch (err) {
+    await fs.rm(tempAbs, { recursive: true, force: true }).catch(() => {});
+    throw err;
+  } finally {
+    await journal.done();
   }
 }
 
@@ -214,6 +302,7 @@ function ok(src: string, t: Target): OpResult {
 
 function failed(src: string, err: unknown): OpResult {
   const code = (err as NodeJS.ErrnoException)?.code;
+  if (code === "ECANCELED") return { path: src, status: "skipped", skipped: true, error: "Cancelled" };
   const message =
     err instanceof HttpError
       ? err.message
@@ -361,7 +450,7 @@ async function indexCopiedTree(srcRel: string, targetRel: string) {
 export async function copyItem(
   user: SessionUser,
   acl: AclEvaluator,
-  opts: { srcRel: string; destDirRel: string; onConflict: ConflictAction }
+  opts: { srcRel: string; destDirRel: string; onConflict: ConflictAction; onProgress?: ProgressFn }
 ): Promise<OpResult> {
   const srcRel = normalizeRelPath(opts.srcRel);
   try {
@@ -388,18 +477,7 @@ export async function copyItem(
       if (!t) return { path: srcRel, status: "skipped", skipped: true };
       if (!isTarget(t)) return t;
 
-      if (isDir) {
-        await fs.cp(srcAbs, t.abs, {
-          recursive: true,
-          errorOnExist: true,
-          force: false,
-          preserveTimestamps: true,
-        });
-      } else {
-        // COPYFILE_EXCL: never overwrite, even if something appeared meanwhile.
-        await fs.copyFile(srcAbs, t.abs, fsConstants.COPYFILE_EXCL);
-        await fs.utimes(t.abs, srcStat.atime, srcStat.mtime);
-      }
+      await copyIntoPlace(srcAbs, destDirAbs, t.name, isDir, opts.onProgress);
 
       try {
         await prisma.$transaction(async (tx) => {
@@ -465,6 +543,14 @@ async function trashLocked(user: SessionUser, rel: string, abs: string, kind = "
   await audit(user.id, "TRASH", { path: rel, trashPath: trashName });
   await publishChange([parentOf(rel), TRASH_PREFIX], [node.id]);
   return node;
+}
+
+/**
+ * Move the item at `rel` to Trash because something is replacing it. The
+ * caller must hold the path lock for `abs`.
+ */
+export async function trashForReplace(user: SessionUser, rel: string, abs: string) {
+  return trashLocked(user, rel, abs);
 }
 
 export async function trashItem(user: SessionUser, acl: AclEvaluator, relInput: string): Promise<OpResult> {

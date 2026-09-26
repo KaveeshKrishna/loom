@@ -43,6 +43,8 @@ import { queueProcessFile, notifyScanner } from "./jobs";
 import { publishChange } from "./events";
 import { acquireMultiPathLock } from "./fs-locks";
 import { HttpError, badRequest, conflict, forbidden, notFound, type SessionUser } from "./http";
+import { beginJournal, fsyncDir, JOURNAL_DIR, type JournalHandle } from "./fs-journal";
+import { trashForReplace } from "./file-ops";
 
 export const CHUNK_SIZE = Math.max(1, Math.min(95, parseInt(process.env.LOOM_UPLOAD_CHUNK_MB ?? "32", 10) || 32)) * 1024 * 1024;
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -221,11 +223,22 @@ export interface FinalizeResult {
   path: string;
   name: string;
   renamed: boolean;
+  replaced: boolean;
   nodeId: string | null;
   processing: boolean;
 }
 
-export async function finalizeUpload(user: SessionUser, session: UploadSession): Promise<FinalizeResult> {
+export type UploadConflict = "keep_both" | "replace";
+
+export function parseUploadConflict(v: unknown): UploadConflict {
+  return v === "replace" ? "replace" : "keep_both";
+}
+
+export async function finalizeUpload(
+  user: SessionUser,
+  session: UploadSession,
+  onConflict: UploadConflict = "keep_both"
+): Promise<FinalizeResult> {
   const file = partialPath(session.id);
   const st = await fs.stat(file).catch(() => null);
   if (!st) throw notFound("Upload data is missing — please start the upload again");
@@ -245,34 +258,68 @@ export async function finalizeUpload(user: SessionUser, session: UploadSession):
 
   const release = await acquireMultiPathLock([path.join(dirAbs, wanted)]);
   let finalName = wanted;
+  let replaced = false;
+  let pendingJournal: JournalHandle | null = null;
   try {
+    // "Replace": the existing file (never a folder) goes to Trash first, so
+    // it can be restored. Its name is then free for the new upload.
+    if (onConflict === "replace") {
+      const existing = await fs.lstat(path.join(dirAbs, wanted)).catch(() => null);
+      if (existing?.isFile() && acl.canAccess(target)) {
+        await trashForReplace(user, target, path.join(dirAbs, wanted));
+        replaced = true;
+      }
+    }
+
+    // Journal first: if the power goes out from here on, the next start
+    // either finishes indexing the file or removes the empty placeholder.
+    const lastModified = session.lastModified ? Number(session.lastModified) : null;
+    const journal = await beginJournal({
+      kind: "upload",
+      sessionId: session.id,
+      partialAbs: file,
+      finalAbs: path.join(dirAbs, wanted),
+      size: Number(session.size),
+      lastModified,
+    });
+
     // Reserve a free name with O_EXCL, then atomically rename the finished
     // upload over our own empty placeholder. Nothing else is ever replaced.
     const ext = path.extname(wanted);
     const base = ext ? wanted.slice(0, -ext.length) : wanted;
-    for (let n = 1; ; n++) {
-      try {
-        const fh = await fs.open(path.join(dirAbs, finalName), "wx");
-        await fh.close();
-        break;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "EEXIST" || n > 10_000) throw err;
-        finalName = `${base} (${n})${ext}`;
+    try {
+      for (let n = 1; ; n++) {
+        try {
+          const fh = await fs.open(path.join(dirAbs, finalName), "wx");
+          await fh.close();
+          break;
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "EEXIST" || n > 10_000) throw err;
+          finalName = `${base} (${n})${ext}`;
+        }
       }
+    } catch (err) {
+      await journal.done();
+      throw err;
     }
     const finalAbs = path.join(dirAbs, finalName);
+    // Only now is there a placeholder of ours that recovery may remove.
+    await journal.update({ finalAbs, placeholder: true });
     try {
       await fs.rename(file, finalAbs);
     } catch (err) {
       await fs.rm(finalAbs, { force: true }).catch(() => {});
+      await journal.done();
       throw err;
     }
-    if (session.lastModified) {
-      const mtime = new Date(Number(session.lastModified));
+    await fsyncDir(dirAbs);
+    if (lastModified) {
+      const mtime = new Date(lastModified);
       if (mtime.getTime() > 0 && mtime.getTime() < Date.now() + 86_400_000) {
         await fs.utimes(finalAbs, new Date(), mtime).catch(() => {});
       }
     }
+    pendingJournal = journal;
   } finally {
     release();
   }
@@ -290,17 +337,19 @@ export async function finalizeUpload(user: SessionUser, session: UploadSession):
       data: {
         userId: user.id,
         action: "UPLOAD",
-        details: { originalName: wanted, finalPath: finalRel, size: Number(session.size), renamed: finalName !== wanted },
+        details: { originalName: wanted, finalPath: finalRel, size: Number(session.size), renamed: finalName !== wanted, replaced },
       },
     });
+    await pendingJournal?.done();
   } catch (err) {
-    // The file itself is safely in place; a rescan will index it.
+    // The file itself is safely in place; the journal entry stays, so the
+    // next start (or a rescan) indexes it.
     console.error("[upload] indexing after upload failed for", finalRel, err);
   }
   if (processing) await notifyScanner();
   await publishChange([dirRel], nodeId ? [nodeId] : undefined);
 
-  return { success: true, path: finalRel, name: finalName, renamed: finalName !== wanted, nodeId, processing };
+  return { success: true, path: finalRel, name: finalName, renamed: finalName !== wanted, replaced, nodeId, processing };
 }
 
 // ─── cancel / cleanup ────────────────────────────────────────────────────────
@@ -322,7 +371,7 @@ export async function purgeExpiredUploads(): Promise<number> {
   const live = new Set((await prisma.uploadSession.findMany({ select: { id: true } })).map((s) => s.id));
   for (const f of await fs.readdir(UPLOAD_TEMP_DIR).catch(() => [] as string[])) {
     const id = f.replace(/\.partial$/, "");
-    if (live.has(id)) continue;
+    if (live.has(id) || path.join(UPLOAD_TEMP_DIR, f) === JOURNAL_DIR) continue;
     const st = await fs.stat(path.join(UPLOAD_TEMP_DIR, f)).catch(() => null);
     if (st && Date.now() - st.mtimeMs > SESSION_TTL_MS) {
       await fs.rm(path.join(UPLOAD_TEMP_DIR, f), { force: true, recursive: true }).catch(() => {});

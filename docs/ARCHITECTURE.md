@@ -50,14 +50,17 @@ Uploads are chunked, resumable, and verified. The browser side is in web/compone
    - It checks the checksum and flushes the chunk to disk before acknowledging it.
    - A corrupted chunk is thrown away and sent again automatically.
    - Because each chunk is a separate request, uploads work behind proxies with body-size limits, such as Cloudflare's 100 MB.
-3. If the connection drops, the browser retries with backoff and asks the server how much it actually has. If the tab is closed, choosing the same file again later resumes from the last acknowledged byte (for 24 hours).
-4. The last chunk finalizes the upload in the same request:
-   - The final name is reserved atomically with O_EXCL, and the finished file is renamed over that placeholder. An upload never overwrites anything. If the name is taken, the file becomes `name (1).ext`, Windows-style.
+3. If the connection drops, the browser retries with backoff and asks the server how much it actually has. If the tab is closed (or the server loses power), choosing the same file again later resumes from the last acknowledged byte, for 24 hours. The browser finds the unfinished session by destination, path and size, so this works even from another browser, and the upload panel lists unfinished uploads on load, with a Discard button.
+4. Before any bytes are sent, the browser asks the server which of the files already exist (`POST /api/fs/conflicts`) and asks the user what to do with each: Replace, Skip or Keep both, with "do this for all". Skipped files are never sent.
+5. The last chunk finalizes the upload in the same request:
+   - A journal entry is written first (see "Surviving power cuts" below).
+   - With Replace, the existing file (never a folder) goes to Trash.
+   - The final name is reserved atomically with O_EXCL, and the finished file is renamed over that placeholder, then the folder is flushed to disk. An upload never overwrites anything. With Keep both, or if a file with the name appeared meanwhile, the file becomes `name (1).ext`, Windows-style.
    - The file gets its original modification date from the browser.
    - The index is updated and a PROCESS_FILE job is queued.
    - The request returns right away. "Uploaded" means every byte is stored and verified.
 
-A file only ever appears in /media once it is complete. The scanner never looks inside .tmp-upload, and abandoned sessions are cleaned up after a day.
+A file only ever appears in /media once it is complete. The scanner never looks inside .tmp-upload, and abandoned sessions are cleaned up after a day (or right away from the upload panel, or Settings → Storage).
 
 ## Live updates
 
@@ -107,6 +110,32 @@ All changes Loom makes to your files go through web/lib/file-ops.ts: rename, mov
 - A folder's descendants are updated with one SQL statement, so moving a folder with 50,000 files is instant.
 - Permission rules and trash restore locations follow a folder when it's renamed or moved.
 - Case-only renames (photo.jpg → Photo.jpg) work on case-insensitive drives like exFAT.
+
+## Copy, move and name clashes
+
+Copying or moving works like Windows Explorer (web/lib/transfer.ts):
+
+1. A dry run (`POST /api/fs/conflicts`) walks the source and lists every file that already exists at the destination, with both sizes and dates. Same-named folders aren't conflicts: they merge.
+2. The browser asks about each file: Replace (the existing one goes to Trash), Skip, or Keep both (`name (1).ext`). "Do this for the other N conflicts" answers the rest. A file and a folder with the same name can't replace each other, so only Keep both or Skip applies there.
+3. The move or copy runs with those decisions. Merging a folder by moving leaves the source folder behind only if some files in it were skipped.
+
+Moves are instant renames. Copies run as background jobs (web/lib/copy-jobs.ts): the request returns straight away, progress arrives as live events, and a copy can be cancelled. That keeps big copies from hitting proxy time limits (Cloudflare's is 100 seconds).
+
+## Surviving power cuts
+
+Every multi-step change is written so that an interruption at any point leaves either the old state or the new one, never something half-done:
+
+- Copies are written to a hidden `.loom-tmp-…` name next to the destination and renamed into place only when every byte is on disk, without ever overwriting anything (a hard link that fails if the name is taken, or a check-and-rename under the path lock on drives without hard links, like exFAT).
+- Text edits are written to a temp file, flushed, then renamed over the original; the previous version is already in Trash.
+- Uploads only appear once finished (see Uploads).
+
+Before each of these, Loom writes a small journal entry to `.tmp-upload/journal/` and flushes it (web/lib/fs-journal.ts). When the web app starts (web/instrumentation.ts → web/lib/recovery.ts), it goes through entries left by the previous run:
+
+- A temp file from an interrupted copy or edit is deleted.
+- An upload that was being moved into place is either finished (the file is complete, so it's indexed) or rolled back (its empty name placeholder is removed; the upload can still be resumed).
+- Copy jobs that were running are marked as interrupted. Files they had already copied are complete and stay.
+
+As a backstop, a full rescan also deletes Loom temp files older than an hour that no journal entry refers to, and never indexes them. Recovery only ever deletes files Loom itself created.
 
 ## Editing text files
 

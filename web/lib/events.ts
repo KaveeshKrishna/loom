@@ -21,7 +21,19 @@ export interface LoomEvent {
   nodeIds?: string[];
   /** "processed" when the scanner finished generating thumbnails/previews */
   reason?: string;
-  job?: { id: string; kind: string; status: string; progress?: number; userId?: string };
+  job?: {
+    id: string;
+    kind: string;
+    status: string;
+    progress?: number;
+    userId?: string;
+    bytesDone?: number;
+    bytesTotal?: number;
+    filesDone?: number;
+    filesTotal?: number;
+    summary?: { done: number; skipped: number; failed: number; errors: { path: string; error: string }[] };
+    error?: string;
+  };
 }
 
 type Listener = (ev: LoomEvent) => void;

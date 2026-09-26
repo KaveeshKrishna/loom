@@ -40,11 +40,75 @@ function statusIcon(entry: UploadEntry) {
   }
 }
 
+/**
+ * Uploads the server still has partial data for — after a power cut, a
+ * crash or a closed tab. Picking the same files again (same folder) resumes
+ * them; Discard frees the space now instead of after 24 hours.
+ */
+function UnfinishedBanner() {
+  const { unfinished, discardUnfinished, setVisible, uploads } = useUpload();
+  const [busy, setBusy] = useState(false);
+  if (unfinished.length === 0) return null;
+  const bytes = unfinished.reduce((s, u) => s + u.received, 0);
+  const n = unfinished.length;
+  return (
+    <div className="px-4 py-3 border-b border-[hsl(var(--border))] bg-amber-500/5 text-xs">
+      <p className="font-medium text-[hsl(var(--foreground))]">
+        {n} unfinished upload{n === 1 ? "" : "s"} ({formatBytes(bytes)} received)
+      </p>
+      <p className="mt-0.5 text-[hsl(var(--muted-foreground))] truncate">
+        {unfinished
+          .slice(0, 2)
+          .map((u) => (u.destDir ? `${u.destDir}/${u.relativePath}` : u.relativePath))
+          .join(", ")}
+        {n > 2 ? ` and ${n - 2} more` : ""}
+      </p>
+      <p className="mt-0.5 text-[hsl(var(--muted-foreground))]">
+        Pick the same files again in the same folder to continue where they stopped. Unfinished files never appear in your folders.
+      </p>
+      <div className="mt-2 flex gap-2">
+        <button
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            await discardUnfinished();
+            setBusy(false);
+            if (uploads.length === 0) setVisible(false);
+          }}
+          className="px-2.5 py-1 rounded-md border hover:bg-[hsl(var(--accent))] disabled:opacity-50"
+        >
+          Discard {n === 1 ? "it" : "all"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function UploadWidget() {
-  const { uploads, isVisible, setVisible, cancelUpload, retryUpload, dismissUpload, clearCompleted } = useUpload();
+  const { uploads, isVisible, setVisible, cancelUpload, retryUpload, dismissUpload, clearCompleted, unfinished } = useUpload();
   const [collapsed, setCollapsed] = useState(false);
 
-  if (uploads.length === 0) return null;
+  if (uploads.length === 0 && unfinished.length === 0) return null;
+  if (uploads.length === 0) {
+    if (!isVisible) return null;
+    return (
+      <div
+        className="fixed bottom-24 md:bottom-6 right-2 left-2 sm:left-auto sm:right-6 z-50 sm:w-96 rounded-xl shadow-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden"
+        role="region"
+        aria-label="Unfinished uploads"
+      >
+        <div className="flex items-center justify-between px-4 py-2 border-b border-[hsl(var(--border))]">
+          <span className="text-sm font-semibold flex items-center gap-2">
+            <Upload size={15} className="text-[hsl(var(--primary))]" /> Uploads
+          </span>
+          <button onClick={() => setVisible(false)} className="p-1.5 rounded-md hover:bg-[hsl(var(--accent))] text-[hsl(var(--muted-foreground))]" aria-label="Close">
+            <X size={14} />
+          </button>
+        </div>
+        <UnfinishedBanner />
+      </div>
+    );
+  }
 
   const active = uploads.filter((u) => u.status === "uploading" || u.status === "pending" || u.status === "finalizing");
   const failed = uploads.filter((u) => u.status === "error");
@@ -124,6 +188,7 @@ export function UploadWidget() {
         )}
       </div>
 
+      {!collapsed && <UnfinishedBanner />}
       {!collapsed && (
         <div className="max-h-72 overflow-y-auto py-1">
           {uploads.map((entry) => (
@@ -168,7 +233,8 @@ function UploadRow({
               onClick={() => router.push(filesHref(parentOf(entry.finalPath!)))}
             >
               {name}
-              {entry.renamed && <span className="ml-1.5 text-[hsl(var(--muted-foreground))] font-normal">(renamed — a file with that name existed)</span>}
+              {entry.renamed && <span className="ml-1.5 text-[hsl(var(--muted-foreground))] font-normal">(kept both — saved with a number added)</span>}
+              {entry.replaced && <span className="ml-1.5 text-[hsl(var(--muted-foreground))] font-normal">(replaced — the old one is in Trash)</span>}
             </button>
           ) : (
             <p className="text-xs font-medium truncate text-[hsl(var(--foreground))]" title={entry.relativePath}>

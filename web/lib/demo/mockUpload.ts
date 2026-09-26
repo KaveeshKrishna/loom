@@ -10,7 +10,7 @@
  *
  * Every other XHR falls through to the real XMLHttpRequest unaltered.
  */
-import { mutate, nextId } from "./state";
+import { getState, mutate, nextId } from "./state";
 import { DEMO_OWNER_ID } from "./types";
 import { pickPhotoAsset, pickVideoAsset } from "./assets";
 
@@ -70,7 +70,7 @@ export function installUploadShim(): void {
           session.received += bytes;
           if (u.searchParams.get("final") === "1" && session.received >= session.size) {
             demoUploadSessions.delete(id);
-            this._respondJson(200, this._finish(session));
+            this._respondJson(200, this._finish(session, u.searchParams.get("conflict") === "replace" ? "replace" : "keep_both"));
           } else {
             this._respondJson(200, { received: session.received });
           }
@@ -78,11 +78,28 @@ export function installUploadShim(): void {
       }, 90);
     }
 
-    private _finish(session: DemoUploadSession) {
-      const fileName = session.relativePath.split("/").pop()!;
+    private _finish(session: DemoUploadSession, conflict: "replace" | "keep_both") {
+      const wanted = session.relativePath.split("/").pop()!;
       const subDir = session.relativePath.split("/").slice(0, -1).join("/");
       const dir = [session.destDir, subDir].filter(Boolean).join("/");
-      const relativePath = dir ? `${dir}/${fileName}` : fileName;
+      const at = (name: string) => (dir ? `${dir}/${name}` : name);
+      const taken = (name: string) => getState().nodes.some((n) => !n.inTrash && n.relativePath === at(name));
+      let fileName = wanted;
+      let replaced = false;
+      if (taken(wanted)) {
+        if (conflict === "replace") {
+          mutate((st) => {
+            st.nodes = st.nodes.filter((n) => n.inTrash || n.relativePath !== at(wanted));
+          });
+          replaced = true;
+        } else {
+          const dot = wanted.lastIndexOf(".");
+          const base = dot > 0 ? wanted.slice(0, dot) : wanted;
+          const ext = dot > 0 ? wanted.slice(dot) : "";
+          for (let n = 1; taken(fileName); n++) fileName = `${base} (${n})${ext}`;
+        }
+      }
+      const relativePath = at(fileName);
       const ext = fileName.includes(".") ? fileName.split(".").pop()!.toLowerCase() : "";
       const isImage = ["jpg", "jpeg", "png", "gif", "webp"].includes(ext);
       const isVideo = ["mp4", "mov", "mkv", "webm", "avi"].includes(ext);
@@ -104,7 +121,7 @@ export function installUploadShim(): void {
         });
         st.auditLogs.unshift({ id: nextId("audit"), userId: DEMO_OWNER_ID, action: "UPLOAD", details: { originalName: fileName, finalPath: relativePath, size: session.size, renamed: false }, timestamp: new Date().toISOString() });
       });
-      return { success: true, path: relativePath, name: fileName, renamed: false, nodeId: id, processing: false };
+      return { success: true, path: relativePath, name: fileName, renamed: fileName !== wanted, replaced, nodeId: id, processing: false };
     }
 
     private _respondJson(status: number, data: unknown) {

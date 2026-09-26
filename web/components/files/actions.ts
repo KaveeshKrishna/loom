@@ -7,11 +7,11 @@
  */
 
 import { api, ApiError, parentOf } from "@/lib/client/api";
-import { emitDirChange } from "@/lib/client/live";
+import { emitDirChange, onJobEvent, type JobEvent } from "@/lib/client/live";
 import type { LNode } from "@/lib/client/types";
 import { toast } from "@/components/ui/Toaster";
 import { dialogs, validateFileName } from "@/components/ui/Dialog";
-import { askCollision, type CollisionAction } from "./CollisionDialog";
+import { askCollision, resolveConflicts, type CollisionAction, type ConflictInfo, type Resolution } from "./CollisionDialog";
 
 interface OpResult {
   path: string;
@@ -33,52 +33,6 @@ export function registerPinUpdater(fn: PinHook | null) {
   pinUpdater = fn;
 }
 
-/**
- * Run a batch operation, then ask about conflicts one by one (with "apply to
- * all") and retry those with the chosen action.
- */
-async function runWithConflicts(
-  sources: string[],
-  call: (paths: string[], action: CollisionAction | "ask") => Promise<OpResult[]>,
-  destDir: string
-): Promise<OpResult[]> {
-  let results = await call(sources, "ask");
-  const conflicts = results.filter((r) => r.status === "conflict");
-  if (conflicts.length === 0) return results;
-
-  const decided = new Map<string, CollisionAction>();
-  let all: CollisionAction | null = null;
-  for (let i = 0; i < conflicts.length; i++) {
-    const c = conflicts[i];
-    if (all) {
-      decided.set(c.path, all);
-      continue;
-    }
-    const choice = await askCollision({
-      name: c.existing?.name ?? c.path.split("/").pop()!,
-      destLabel: label(destDir),
-      remaining: conflicts.length - i - 1,
-      isFolder: c.existing?.type === "DIRECTORY",
-    });
-    if (!choice) break; // dialog closed: treat the rest as skipped
-    decided.set(c.path, choice.action);
-    if (choice.applyToAll) all = choice.action;
-  }
-
-  results = results.filter((r) => r.status !== "conflict");
-  const byAction = new Map<CollisionAction, string[]>();
-  for (const c of conflicts) {
-    const a = decided.get(c.path) ?? "skip";
-    if (a === "skip") {
-      results.push({ path: c.path, status: "skipped" });
-      continue;
-    }
-    byAction.set(a, [...(byAction.get(a) ?? []), c.path]);
-  }
-  for (const [action, paths] of byAction) results.push(...(await call(paths, action)));
-  return results;
-}
-
 function summarize(results: OpResult[], verb: string) {
   const ok = results.filter((r) => r.status === "ok");
   const failed = results.filter((r) => r.status === "error");
@@ -90,54 +44,145 @@ function summarize(results: OpResult[], verb: string) {
   return { ok, failed };
 }
 
+/**
+ * Dry-run a copy/move, then ask about every file that already exists at the
+ * destination (Replace / Skip / Keep both, "do this for all"). Same-named
+ * folders merge. Returns null if the user cancelled.
+ */
+async function askAboutConflicts(op: "copy" | "move", sourcePaths: string[], destDir: string): Promise<Resolution | null> {
+  const { conflicts, truncated } = await api<{ conflicts: ConflictInfo[]; truncated: boolean }>("/api/fs/conflicts", {
+    method: "POST",
+    json: { op, sourcePaths, destDir },
+  });
+  if (conflicts.length === 0) return { decisions: {}, defaultAction: "skip" };
+  if (truncated) toast.info(`More than ${conflicts.length.toLocaleString()} files already exist there; your last choice applies to the rest.`);
+  return resolveConflicts(conflicts, label(destDir));
+}
+
 // ─── move / copy ─────────────────────────────────────────────────────────────
+
+interface TransferSummary {
+  done: number;
+  skipped: number;
+  failed: number;
+  errors: { path: string; error: string }[];
+}
+
+function outcome(verb: string, s: TransferSummary, destDir: string) {
+  const parts = [`${verb} ${plural(s.done, "item")} to ${label(destDir)}`];
+  if (s.skipped) parts.push(`skipped ${s.skipped}`);
+  if (s.failed) parts.push(`${s.failed} failed${s.errors[0] ? `: ${s.errors[0].error}` : ""}`);
+  return parts.join(", ");
+}
 
 export async function moveItems(paths: string[], destDir: string, opts: { undo?: boolean } = {}) {
   const sources = paths.filter((p) => parentOf(p) !== destDir);
   if (sources.length === 0) return;
   try {
-    const results = await runWithConflicts(
-      sources,
-      async (p, action) => (await api<{ results: OpResult[] }>("/api/fs/move", { method: "POST", json: { sourcePaths: p, destDir, action } })).results,
-      destDir
-    );
-    const { ok } = summarize(results, "Moved");
+    const res = await askAboutConflicts("move", sources, destDir);
+    if (!res) return;
+    const { results, summary } = await api<{ results: OpResult[]; summary: TransferSummary }>("/api/fs/move", {
+      method: "POST",
+      json: { sourcePaths: sources, destDir, ...res },
+    });
+    const ok = results.filter((r) => r.status === "ok");
     for (const r of ok) if (r.targetRel) pinUpdater?.(r.path, r.targetRel);
     emitDirChange([destDir, ...sources.map(parentOf)]);
-    if (ok.length && opts.undo !== false) {
-      toast.success(`Moved ${ok.length === 1 ? `"${ok[0].name}"` : plural(ok.length, "item")} to ${label(destDir)}`, {
-        action: {
-          label: "Undo",
-          onClick: async () => {
-            const byParent = new Map<string, string[]>();
-            for (const r of ok) byParent.set(parentOf(r.path), [...(byParent.get(parentOf(r.path)) ?? []), r.targetRel!]);
-            for (const [orig, targets] of byParent) await moveItems(targets, orig, { undo: false });
-          },
-        },
-      });
+    if (summary.done === 0 && summary.failed > 0) {
+      toast.error(`Couldn't move: ${summary.errors[0]?.error ?? "failed"}`);
+      return;
     }
+    const message =
+      summary.skipped || summary.failed || ok.length !== 1 ? outcome("Moved", summary, destDir) : `Moved "${ok[0].name}" to ${label(destDir)}`;
+    const toastFn = summary.failed ? toast.error : toast.success;
+    toastFn(message, {
+      action:
+        ok.length && opts.undo !== false
+          ? {
+              label: "Undo",
+              onClick: async () => {
+                const byParent = new Map<string, string[]>();
+                for (const r of ok) byParent.set(parentOf(r.path), [...(byParent.get(parentOf(r.path)) ?? []), r.targetRel!]);
+                for (const [orig, targets] of byParent) await moveItems(targets, orig, { undo: false });
+              },
+            }
+          : undefined,
+    });
   } catch (err) {
     toast.error((err as Error).message);
   }
 }
 
+const fmtBytes = (n: number) => {
+  if (n < 1024) return `${n} B`;
+  const u = ["KB", "MB", "GB", "TB"];
+  let i = -1;
+  do {
+    n /= 1024;
+    i++;
+  } while (n >= 1024 && i < u.length - 1);
+  return `${n.toFixed(n < 10 ? 1 : 0)} ${u[i]}`;
+};
+
 export async function copyItems(paths: string[], destDir: string) {
   if (paths.length === 0) return;
-  const t = toast.loading(`Copying ${plural(paths.length, "item")}…`);
   try {
-    const results = await runWithConflicts(
-      paths,
-      async (p, action) => (await api<{ results: OpResult[] }>("/api/fs/copy", { method: "POST", json: { sourcePaths: p, destDir, action } })).results,
-      destDir
-    );
-    toast.dismiss(t);
-    const { ok } = summarize(results, "Copied");
-    if (ok.length) toast.success(`Copied ${ok.length === 1 ? `"${ok[0].name}"` : plural(ok.length, "item")} to ${label(destDir)}`);
-    emitDirChange([destDir]);
+    const res = await askAboutConflicts("copy", paths, destDir);
+    if (!res) return;
+    const job = await api<{ jobId: string; bytesTotal: number; filesTotal: number; status?: string; summary?: TransferSummary }>("/api/fs/copy", {
+      method: "POST",
+      json: { sourcePaths: paths, destDir, ...res },
+    });
+    trackCopyJob(job, destDir);
   } catch (err) {
-    toast.dismiss(t);
     toast.error((err as Error).message);
   }
+}
+
+/**
+ * Show a copy's progress in a toast until it finishes: live events when the
+ * event stream works, polling otherwise. The toast has a Cancel button.
+ */
+function trackCopyJob(job: { jobId: string; bytesTotal: number; filesTotal: number; status?: string; summary?: TransferSummary }, destDir: string) {
+  const what = plural(job.filesTotal, "file");
+  let finished = false;
+  let lastEvent = Date.now();
+  const cancel = { label: "Cancel", onClick: () => void api(`/api/fs/jobs/${job.jobId}`, { method: "DELETE" }).catch(() => {}) };
+  const t = toast.loading(`Copying ${what}…`);
+  toast.update(t, "loading", `Copying ${what}…`, { action: cancel, duration: 0 });
+
+  const finish = (ev: JobEvent) => {
+    if (finished) return;
+    finished = true;
+    stop();
+    clearInterval(poll);
+    emitDirChange([destDir]);
+    const s = ev.summary;
+    if (ev.status === "CANCELLED") toast.update(t, "info", s ? `Copy cancelled. ${outcome("Copied", s, destDir)}.` : "Copy cancelled.");
+    else if (ev.status === "FAILED" || !s) toast.update(t, "error", `Copy failed: ${ev.error ?? s?.errors[0]?.error ?? "unknown error"}`);
+    else toast.update(t, s.failed ? "error" : "success", outcome("Copied", s, destDir));
+  };
+  const onEvent = (ev: JobEvent) => {
+    if (ev.id !== job.jobId) return;
+    lastEvent = Date.now();
+    if (ev.status === "RUNNING") {
+      const size = ev.bytesTotal ? ` (${fmtBytes(ev.bytesDone ?? 0)} of ${fmtBytes(ev.bytesTotal)})` : "";
+      toast.update(t, "loading", `Copying ${what}… ${ev.progress ?? 0}%${size}`, { action: cancel, duration: 0 });
+    } else finish(ev);
+  };
+  const stop = onJobEvent(onEvent);
+  // Fallback when live events don't arrive (proxy buffering, demo).
+  const poll = setInterval(async () => {
+    if (finished || Date.now() - lastEvent < 3000) return;
+    try {
+      const j = await api<{ status: string; progress: number; error?: string; payload?: { summary?: TransferSummary; bytesTotal?: number } }>(`/api/fs/jobs/${job.jobId}`);
+      onEvent({ id: job.jobId, kind: "COPY", status: j.status, progress: j.progress, error: j.error ?? undefined, summary: j.payload?.summary });
+      lastEvent = Date.now() - 1000;
+    } catch {
+      /* keep trying */
+    }
+  }, 2000);
+  if (job.status && job.status !== "RUNNING") finish({ id: job.jobId, kind: "COPY", status: job.status, summary: job.summary });
 }
 
 // ─── rename ──────────────────────────────────────────────────────────────────
@@ -234,17 +279,23 @@ export async function restoreItems(fileNodeIds: string[], destDir?: string) {
     let results = await call(fileNodeIds, "ask");
     const conflicts = results.filter((r) => r.status === "conflict");
     if (conflicts.length) {
-      const choice = await askCollision({
-        name: conflicts[0].existing?.name ?? conflicts[0].path.split("/").pop()!,
-        destLabel: label(parentOf(conflicts[0].path)),
-        remaining: conflicts.length - 1,
-        isFolder: conflicts[0].existing?.type === "DIRECTORY",
-      });
       results = results.filter((r) => r.status !== "conflict");
-      if (choice && choice.action !== "skip") {
-        const ids = choice.applyToAll ? conflicts.map((c) => c.id!) : [conflicts[0].id!];
-        results.push(...(await call(ids, choice.action)));
+      const byAction = new Map<CollisionAction, string[]>();
+      for (let i = 0; i < conflicts.length; i++) {
+        const c = conflicts[i];
+        const choice = await askCollision({
+          name: c.existing?.name ?? c.path.split("/").pop()!,
+          destLabel: label(parentOf(c.path)),
+          remaining: conflicts.length - i - 1,
+          isFolder: c.existing?.type === "DIRECTORY",
+        });
+        if (!choice) break;
+        const targets = choice.applyToAll ? conflicts.slice(i) : [c];
+        for (const x of targets) byAction.set(choice.action, [...(byAction.get(choice.action) ?? []), x.id!]);
+        if (choice.applyToAll) break;
       }
+      byAction.delete("skip");
+      for (const [action, ids] of byAction) results.push(...(await call(ids, action)));
     }
     const { ok } = summarize(results, "Restored");
     if (ok.length) toast.success(ok.length === 1 ? `Restored "${ok[0].name}"` : `Restored ${plural(ok.length, "item")}`);

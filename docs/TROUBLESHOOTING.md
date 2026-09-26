@@ -23,6 +23,16 @@ Uploads go in chunks (32 MB by default) and each one is retried on its own, so a
 
 If the page was closed mid-upload, pick the same file again (same folder) and Loom continues where it stopped. Unfinished uploads are cleaned up after 24 hours.
 
+## The server lost power (or crashed) during an upload or copy
+
+Nothing half-finished ends up in your folders:
+
+- Uploads: every file that shows in the folder is complete (each chunk was checksummed and flushed to disk). Partial data sits hidden in `.tmp-upload/` inside the media folder. The upload panel lists unfinished uploads when you open Loom: pick the same files again in the same folder to resume, or Discard. Leftovers are deleted automatically after 24 hours.
+- Folder uploads: pick the same folder again and choose Skip with "Do this for the other N conflicts". The files that already made it are skipped and the rest are uploaded, with no duplicates.
+- Copies: files that finished copying are complete. The one being copied was a hidden temp file and is deleted when Loom starts again. Run the copy again with Skip for all to finish it.
+
+When Loom starts after an interruption, `docker compose logs loom-web` shows a `[recovery]` line with what it cleaned up. To see how much space unfinished uploads use: `sudo du -sh <your LOOM_MEDIA_PATH>/.tmp-upload`, or Settings → Storage (with a Clean up button).
+
 ## Thumbnails or live updates don't appear until I refresh
 
 New thumbnails and changes made by others arrive over a live connection to /api/events. If your reverse proxy buffers responses, they arrive late or not at all. Turn buffering off for that path, see [Reverse proxy](REVERSE-PROXY.md). When the live connection is down, Loom checks every few seconds while something is still processing, so it catches up.

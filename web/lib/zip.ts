@@ -14,6 +14,7 @@ import path from "path";
 import { Readable, PassThrough } from "stream";
 import { MEDIA_ROOT } from "./path-security";
 import { INTERNAL_NAMES } from "./fs-guard";
+import { isLoomTempName } from "./fs-journal";
 import { contentDisposition } from "./send-file";
 
 const STORE_EXT = /\.(jpe?g|png|gif|webp|heic|heif|avif|mp4|m4v|mov|mkv|webm|avi|mp3|m4a|aac|flac|ogg|opus|zip|rar|7z|gz|bz2|xz|zst|pdf|docx|xlsx|pptx)$/i;
@@ -48,7 +49,7 @@ export function zipResponse(roots: ZipRoot[], archiveName: string, allow: (rel: 
         if (!allow(rel, true)) return;
         archive.append("", { name: name + "/", date: st.mtime });
         for (const entry of await fs.readdir(abs, { withFileTypes: true })) {
-          if (INTERNAL_NAMES.has(entry.name) || entry.isSymbolicLink()) continue;
+          if (INTERNAL_NAMES.has(entry.name) || isLoomTempName(entry.name) || entry.isSymbolicLink()) continue;
           await walk(rel ? `${rel}/${entry.name}` : entry.name, `${name}/${entry.name}`);
         }
       } else if (st.isFile() && allow(rel, false)) {

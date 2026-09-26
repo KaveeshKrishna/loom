@@ -84,7 +84,7 @@ export async function purgeUploads(): Promise<number> {
   }
   const live = new Set((await prisma.uploadSession.findMany({ select: { id: true } })).map((s) => s.id));
   for (const f of await readdir(UPLOAD_TEMP_DIR).catch(() => [] as string[])) {
-    if (live.has(f.replace(/\.partial$/, ""))) continue;
+    if (live.has(f.replace(/\.partial$/, "")) || f === "journal") continue; // journal: web/lib/fs-journal.ts
     const st = await stat(join(UPLOAD_TEMP_DIR, f)).catch(() => null);
     if (st && Date.now() - st.mtimeMs > DAY) {
       await rm(join(UPLOAD_TEMP_DIR, f), { recursive: true, force: true }).catch(() => {});

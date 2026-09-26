@@ -39,8 +39,16 @@ export const IGNORED_NAMES = new Set([
 ]);
 
 export function isIgnoredName(name: string): boolean {
-  return IGNORED_NAMES.has(name) || name.startsWith("._") || name.startsWith(".loom-rename-") || name.startsWith(".loom-edit-");
+  return IGNORED_NAMES.has(name) || name.startsWith("._") || isLoomTempName(name);
 }
+
+/** Temporary files Loom writes while copying, editing or renaming (see web/lib/fs-journal.ts). */
+export function isLoomTempName(name: string): boolean {
+  return name.startsWith(".loom-tmp-") || name.startsWith(".loom-rename-") || name.startsWith(".loom-edit-");
+}
+
+/** Journal of in-flight operations, written by the web app (web/lib/fs-journal.ts). */
+export const JOURNAL_DIR = join(UPLOAD_TEMP_DIR, "journal");
 
 export const IMAGE_EXTENSIONS = new Set([
   ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".gif", ".avif", ".tif", ".tiff", ".bmp", ".thm", ".thim",

@@ -257,21 +257,53 @@ function route(method: string, path: string, ctx: Ctx): unknown {
   }
 
   // ── fs ──
+  if (p === "/fs/conflicts" && M("POST")) {
+    // Simplified for the demo: only direct children of the destination are compared.
+    const body = ctx.body as { op: string; sourcePaths?: string[]; destDir: string; files?: { path: string; size?: number; lastModified?: number }[] };
+    const info = (n: DemoFileNode) => ({ type: n.type, size: n.type === "FILE" ? Number(n.size ?? 0) : null, modifiedAt: n.modifiedAt });
+    const conflicts: unknown[] = [];
+    if (body.op === "upload") {
+      for (const f of body.files ?? []) {
+        const existing = findNode(body.destDir ? `${body.destDir}/${f.path}` : f.path);
+        if (!existing) continue;
+        const incoming = { type: "FILE", size: f.size ?? null, modifiedAt: f.lastModified ? new Date(f.lastModified).toISOString() : null };
+        conflicts.push({ key: f.path, name: existing.name, existing: info(existing), incoming, kind: existing.type === "FILE" ? "file" : "mismatch", same: false });
+      }
+    } else {
+      for (const srcRel of body.sourcePaths ?? []) {
+        const src = findNode(srcRel);
+        const dir = srcRel.includes("/") ? srcRel.slice(0, srcRel.lastIndexOf("/")) : "";
+        if (!src || dir === body.destDir) continue;
+        const existing = childrenOneLevel(body.destDir).find((n) => n.name === src.name);
+        if (!existing) continue;
+        conflicts.push({ key: src.name, name: src.name, existing: info(existing), incoming: info(src), kind: existing.type === src.type ? "file" : "mismatch", same: false });
+      }
+    }
+    return { conflicts, truncated: false };
+  }
+
   if ((p === "/fs/copy" || p === "/fs/move") && M("POST")) {
-    const { sourcePaths, destDir, action = "ask" } = ctx.body as { sourcePaths: string[]; destDir: string; action?: string };
+    const { sourcePaths, destDir, decisions = {}, defaultAction = "skip" } = ctx.body as {
+      sourcePaths: string[];
+      destDir: string;
+      decisions?: Record<string, string>;
+      defaultAction?: string;
+    };
     if (!Array.isArray(sourcePaths) || sourcePaths.length === 0 || destDir == null) throw fail(400, "Invalid parameters");
     const isCopy = p === "/fs/copy";
-    const results: unknown[] = [];
+    const results: { path: string; status: string; error?: string; targetRel?: string; name?: string; success?: boolean; skipped?: boolean }[] = [];
     mutate((st) => {
       for (const srcRel of sourcePaths) {
         const src = st.nodes.find((n) => n.relativePath === srcRel && !n.inTrash);
         if (!src) { results.push({ path: srcRel, status: "error", error: "Source not found" }); continue; }
-        if (destDir === srcRel || destDir.startsWith(srcRel + "/")) { results.push({ path: srcRel, status: "error", error: "Can't move a folder into itself" }); continue; }
+        if (destDir === srcRel || destDir.startsWith(srcRel + "/")) { results.push({ path: srcRel, status: "error", error: "Can't put a folder inside itself" }); continue; }
         const fileName = src.name;
         let targetName = fileName;
-        const collision = childrenOneLevel(destDir).find((n) => n.name === fileName && n.id !== src.id);
+        const sameDir = (srcRel.includes("/") ? srcRel.slice(0, srcRel.lastIndexOf("/")) : "") === destDir;
+        if (sameDir && !isCopy) continue;
+        const collision = childrenOneLevel(destDir).find((n) => n.name === fileName && (isCopy || n.id !== src.id));
         if (collision) {
-          if (action === "ask") { results.push({ path: srcRel, status: "conflict", existing: { name: collision.name, type: collision.type } }); continue; }
+          const action = sameDir ? "keep_both" : decisions[fileName] ?? defaultAction;
           if (action === "skip") { results.push({ path: srcRel, status: "skipped", skipped: true }); continue; }
           if (action === "replace") st.nodes = st.nodes.filter((n) => n.id !== collision.id);
           if (action === "keep_both") targetName = uniqueName(destDir, fileName);
@@ -289,7 +321,20 @@ function route(method: string, path: string, ctx: Ctx): unknown {
       }
       st.auditLogs.unshift({ id: nextId("audit"), userId: DEMO_OWNER_ID, action: isCopy ? "COPY" : "MOVE", details: { count: sourcePaths.length }, timestamp: new Date().toISOString() });
     });
-    return { results };
+    const summary = {
+      done: results.filter((r) => r.status === "ok").length,
+      skipped: results.filter((r) => r.status === "skipped").length,
+      failed: results.filter((r) => r.status === "error").length,
+      errors: results.filter((r) => r.status === "error").map((r) => ({ path: r.path, error: r.error ?? "" })),
+    };
+    // Copies run as background jobs on a real server; the demo finishes them at once.
+    if (isCopy) return { jobId: nextId("job"), bytesTotal: 0, filesTotal: sourcePaths.length, status: "COMPLETED", summary };
+    return { results, summary };
+  }
+
+  if (seg[0] === "fs" && seg[1] === "jobs" && seg[2]) {
+    if (M("DELETE")) return { cancelled: false };
+    return { id: seg[2], kind: "COPY", status: "COMPLETED", progress: 100, error: null, payload: {} };
   }
 
   if (p === "/fs/rename" && M("POST")) {
@@ -708,6 +753,11 @@ function route(method: string, path: string, ctx: Ctx): unknown {
     const id = nextId("upload").replace(/[^a-z0-9]/gi, "");
     demoUploadSessions.set(id, { id, destDir, relativePath, size, received: 0, mimeType: String(ctx.body.mimeType ?? "") });
     return { id, destDir, relativePath, size, received: 0, chunkSize: DEMO_CHUNK_SIZE };
+  }
+  if (p === "/upload/sessions" && M("DELETE")) {
+    const removed = demoUploadSessions.size;
+    demoUploadSessions.clear();
+    return { removed, bytes: 0 };
   }
   if (p === "/upload/sessions" && M("GET")) {
     return { sessions: [...demoUploadSessions.values()].map((u) => ({ ...u, chunkSize: DEMO_CHUNK_SIZE })) };

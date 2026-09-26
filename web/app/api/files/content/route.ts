@@ -16,7 +16,7 @@
 import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
-import { randomUUID } from "node:crypto";
+import { beginTemp, fsyncDir, tempName, type JournalHandle } from "@/lib/fs-journal";
 import { prisma } from "@/lib/prisma";
 import { route, requireUser, readJson, badRequest, forbidden, conflict, HttpError } from "@/lib/http";
 import { getAcl } from "@/lib/acl";
@@ -95,7 +95,8 @@ export const PUT = route(async (req) => {
 
   const abs = await resolveMediaPath(rel, true);
   const release = await acquireMultiPathLock([abs]);
-  const tmp = path.join(path.dirname(abs), `.loom-edit-${randomUUID()}`);
+  const tmp = path.join(path.dirname(abs), tempName());
+  let journal: JournalHandle | null = null;
   try {
     const st = await fs.stat(abs);
     if (!st.isFile()) throw badRequest("Not a file");
@@ -108,6 +109,10 @@ export const PUT = route(async (req) => {
 
     await saveVersionToTrash(user, rel, abs);
 
+    // The new contents go to a hidden temp file first; if the power goes out
+    // mid-write, the original stays untouched and the temp file is removed on
+    // the next start (fs-journal.ts).
+    journal = await beginTemp(tmp);
     const fh = await fs.open(tmp, "wx", st.mode & 0o777);
     try {
       await fh.writeFile(body.content, "utf8");
@@ -116,10 +121,12 @@ export const PUT = route(async (req) => {
       await fh.close();
     }
     await fs.rename(tmp, abs);
+    await fsyncDir(path.dirname(abs));
   } catch (err) {
     await fs.rm(tmp, { force: true }).catch(() => {});
     throw err;
   } finally {
+    await journal?.done();
     release();
   }
 

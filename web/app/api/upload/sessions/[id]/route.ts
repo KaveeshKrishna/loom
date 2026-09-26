@@ -1,14 +1,17 @@
 /**
  * GET    /api/upload/sessions/:id              → { received, size, ... } (resume point)
- * PUT    /api/upload/sessions/:id?offset=N[&final=1]
+ * PUT    /api/upload/sessions/:id?offset=N[&final=1[&conflict=replace|keep_both]]
  *        body: raw bytes (application/octet-stream), at most chunkSize
  *        header X-Chunk-SHA256: hex digest of the chunk (recommended)
- *        → { received } or, with final=1 on the last chunk, the finished file
+ *        → { received } or, with final=1 on the last chunk, the finished file.
+ *        conflict says what to do if a file with that name already exists:
+ *        keep_both (default: the upload gets a numbered name) or replace
+ *        (the existing file goes to Trash).
  * DELETE /api/upload/sessions/:id              → cancel and discard
  */
 import { NextResponse } from "next/server";
 import { route, requireUser, badRequest } from "@/lib/http";
-import { getOwnSession, writeChunk, finalizeUpload, cancelUpload, sessionJson } from "@/lib/uploads";
+import { getOwnSession, writeChunk, finalizeUpload, cancelUpload, sessionJson, parseUploadConflict } from "@/lib/uploads";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -31,7 +34,7 @@ export const PUT = route<Ctx>(async (req, { params }) => {
   const received = await writeChunk(session, offset, req.body, sha, contentLength, req.signal);
 
   if (req.nextUrl.searchParams.get("final") === "1" && received === Number(session.size)) {
-    return NextResponse.json(await finalizeUpload(user, session));
+    return NextResponse.json(await finalizeUpload(user, session, parseUploadConflict(req.nextUrl.searchParams.get("conflict"))));
   }
   return NextResponse.json({ received });
 });
