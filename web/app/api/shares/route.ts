@@ -23,7 +23,7 @@ function listQuery(where: object) {
   });
 }
 
-export function serializeLink(l: LinkRow) {
+function serializeLink(l: LinkRow) {
   const token = decryptToken(l.tokenEnc);
   const now = new Date();
   return {
