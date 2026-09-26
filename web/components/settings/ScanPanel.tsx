@@ -20,6 +20,8 @@ function StatusIcon({ status }: { status: string }) {
 export function ScanPanel() {
   const [jobs, setJobs] = useState<ScanJob[]>([]);
   const [scannerStatus, setScannerStatus] = useState("idle");
+  const [online, setOnline] = useState(true);
+  const [queue, setQueue] = useState<{ pending: number; running: number; failedLast24h: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
   const [showAll, setShowAll] = useState(false);
@@ -31,11 +33,11 @@ export function ScanPanel() {
 
   const load = () => {
     fetch("/api/scan").then(r => r.json()).then(d => {
-      setJobs(d.jobs ?? []); setScannerStatus(d.scannerStatus ?? "idle"); setLoading(false);
+      setJobs(d.jobs ?? []); setScannerStatus(d.scannerStatus ?? "idle"); setOnline(d.scannerOnline !== false); setQueue(d.processing ?? null); setLoading(false);
     }).catch(() => setLoading(false));
   };
 
-  const isRunning = jobs.some(j => j.status === "RUNNING");
+  const isRunning = jobs.some(j => j.status === "RUNNING") || !!(queue && queue.pending + queue.running > 0);
   useEffect(() => { load(); const i = setInterval(load, isRunning ? 3000 : 10000); return () => clearInterval(i); }, [isRunning]);
 
   const trigger = async () => {
@@ -44,7 +46,7 @@ export function ScanPanel() {
     setTimeout(() => { load(); setTriggering(false); }, 500);
   };
 
-  const [videoCacheStats, setVideoCacheStats] = useState<{ usedBytes: number, limitBytes: number, cachedVideos: number } | null>(null);
+  const [videoCacheStats, setVideoCacheStats] = useState<{ usedBytes: number, cachedVideos: number } | null>(null);
   const [clearingCache, setClearingCache] = useState(false);
 
   const [thumbStats, setThumbStats] = useState<{ thumbCount: number, previewCount: number, physicalFiles: number } | null>(null);
@@ -66,19 +68,17 @@ export function ScanPanel() {
 
   const resetThumbnailCache = async () => {
     if (!confirm(
-      "This will delete ALL thumbnail and preview data (DB records + cached files) and reset the scanner so it regenerates everything from scratch on the next scan.\n\nOriginal media files will NOT be touched.\n\nContinue?"
+      "This deletes all thumbnails and previews and regenerates them in the background.\n\nYour original files are not touched.\n\nContinue?"
     )) return;
     setResettingThumbs(true);
-    await fetch("/api/thumbnail-cache", { method: "DELETE" });
-    // Kick off a fresh rescan automatically
-    await fetch("/api/scan", { method: "POST" });
+    await fetch("/api/thumbnail-cache", { method: "DELETE" }); // also queues the rescan
     loadThumbStats();
     load();
     setResettingThumbs(false);
   };
 
   const clearVideoCache = async () => {
-    if (!confirm("Are you sure you want to clear the generated video cache? This will NOT delete original files on the T7.")) return;
+    if (!confirm("Clear the converted-video cache? Videos are converted again the next time they're played. Your original files are not touched.")) return;
     setClearingCache(true);
     await fetch("/api/video-cache", { method: "DELETE" });
     loadStats();
@@ -89,13 +89,22 @@ export function ScanPanel() {
     <div className="max-w-2xl space-y-6">
       <div>
         <h2 className="text-base font-semibold">Scanner</h2>
-        <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">The scanner automatically indexes new files when the Samsung T7 is connected. You can trigger a manual reconciliation below.</p>
+        <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">
+          Files uploaded through Loom are indexed and get thumbnails automatically. Loom doesn&apos;t watch the drive (so it can sleep), so files you add or change outside Loom show up after a scan. Scans only compare file sizes and dates; new photos and videos are then processed in the background.
+        </p>
       </div>
 
       <div className="bg-[hsl(var(--card))] border rounded-xl p-4 flex items-center justify-between">
         <div>
-          <p className="text-sm font-medium">Scanner status</p>
-          <p className="text-xs text-[hsl(var(--muted-foreground))] mt-0.5 capitalize">{scannerStatus}</p>
+          <p className="text-sm font-medium flex items-center gap-2">
+            Scanner
+            <span className={`inline-block w-2 h-2 rounded-full ${online ? "bg-emerald-500" : "bg-red-500"}`} title={online ? "Running" : "Not responding"} />
+          </p>
+          <p className="text-xs text-[hsl(var(--muted-foreground))] mt-0.5">
+            {!online ? "Not responding — check `docker compose logs loom-scanner`" : scannerStatus === "scanning" ? "Scanning…" : "Idle"}
+            {queue && (queue.pending + queue.running > 0) && ` · processing ${queue.running + queue.pending} file(s) in the background`}
+            {queue && queue.failedLast24h > 0 && ` · ${queue.failedLast24h} failed in the last 24h`}
+          </p>
         </div>
         <div className="flex gap-2">
           
@@ -135,7 +144,7 @@ export function ScanPanel() {
           <p className="text-sm font-medium">HLS Video Cache (NVMe)</p>
           <p className="text-xs text-[hsl(var(--muted-foreground))] mt-0.5">
             {videoCacheStats ? (
-              `${(videoCacheStats.usedBytes / 1e9).toFixed(2)} GB used of ${(videoCacheStats.limitBytes / 1e9).toFixed(0)} GB (${videoCacheStats.cachedVideos} videos)`
+              `${(videoCacheStats.usedBytes / 1e9).toFixed(2)} GB of converted video segments (${videoCacheStats.cachedVideos} videos probed)`
             ) : "Loading..."}
           </p>
         </div>

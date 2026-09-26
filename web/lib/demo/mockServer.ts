@@ -13,6 +13,9 @@
  */
 import { getState, mutate, nextId } from "./state";
 import { demoUploadSessions, DEMO_CHUNK_SIZE } from "./mockUpload";
+
+/** Text edited in the demo's editor lives only in this tab's memory. */
+const demoTextContent = new Map<string, string>();
 import { DemoFileNode, DemoAclRule, DemoUser, DemoAuditLog, DemoNotification, DEMO_OWNER_ID } from "./types";
 
 const realFetch = typeof window !== "undefined" ? window.fetch.bind(window) : (undefined as unknown as typeof fetch);
@@ -150,10 +153,11 @@ function route(method: string, path: string, ctx: Ctx): unknown {
     const type = ctx.search.get("type") ?? "";
     const limit = Math.min(parseInt(ctx.search.get("limit") ?? "100", 10), 500);
     const cursor = ctx.search.get("cursor");
-    const prefix = type === "image" ? "image/" : type === "video" ? "video/" : type === "document" ? "application/" : null;
-    if (!prefix) return { nodes: [], nextCursor: null };
+    const match = (m: string | null) =>
+      !m ? false : type === "image" ? m.startsWith("image/") : type === "video" ? m.startsWith("video/") : type === "audio" ? m.startsWith("audio/") : type === "document" ? /^text\/|pdf|document|sheet|presentation|msword|rtf/.test(m) : false;
+    if (!["image", "video", "audio", "document"].includes(type)) return { nodes: [], nextCursor: null };
     const list = visible(s.nodes)
-      .filter((n) => n.type === "FILE" && n.mimeType?.startsWith(prefix))
+      .filter((n) => n.type === "FILE" && match(n.mimeType))
       .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
     const { page, nextCursor } = paginate(list, limit, cursor);
     return { nodes: page, nextCursor };
@@ -181,42 +185,43 @@ function route(method: string, path: string, ctx: Ctx): unknown {
     if (!pathParam) throw fail(400, "Path is required");
     const node = findNode(pathParam);
     if (!node) throw fail(404, "Not found");
-    let childCount: number | undefined;
     let size = node.size ?? "0";
+    let fileCount: number | undefined;
+    let dirCount: number | undefined;
     if (node.type === "DIRECTORY") {
       const prefix = `${node.relativePath}/`;
       const descendants = visible(s.nodes).filter((n) => n.relativePath.startsWith(prefix));
-      childCount = descendants.length;
+      fileCount = descendants.filter((n) => n.type === "FILE").length;
+      dirCount = descendants.length - fileCount;
       size = String(descendants.filter((n) => n.type === "FILE").reduce((sum, n) => sum + Number(n.size ?? 0), 0));
     }
+    const ci = node.contentIdentity as { preview?: { width?: number; height?: number } | null; videoCaches?: { durationSeconds?: number }[] } | null;
+    const isVideo = node.mimeType?.startsWith("video/");
+    const mediaInfo = node.mimeType?.startsWith("image/") || isVideo
+      ? { kind: isVideo ? "video" : "image", width: ci?.preview?.width ?? 1920, height: ci?.preview?.height ?? 1080, durationSeconds: ci?.videoCaches?.[0]?.durationSeconds, camera: isVideo ? undefined : "Demo Camera" }
+      : null;
     return {
+      id: node.id,
+      name: node.name,
       type: node.type,
+      mimeType: node.mimeType,
       relativePath: node.relativePath,
       size,
-      childCount,
+      childCount: fileCount !== undefined ? fileCount + (dirCount ?? 0) : undefined,
+      fileCount,
+      dirCount,
       modifiedAt: node.modifiedAt,
+      indexedAt: node.indexedAt,
       healthStatus: node.healthStatus,
       healthError: node.healthError,
-      fastHash: node.contentIdentity?.fastHash,
-      videoDetails: node.contentIdentity?.videoCaches?.[0]
-        ? { duration: node.contentIdentity.videoCaches[0].durationSeconds ?? 0 }
-        : null,
-    };
-  }
-
-  if (p === "/files/health" && M("GET")) {
-    const statusFilter = ctx.search.get("status");
-    const all = s.nodes.filter((n) => !n.inTrash && (n.healthStatus === "CORRUPT" || n.healthStatus === "UNSUPPORTED"));
-    const filtered = statusFilter ? all.filter((n) => n.healthStatus === statusFilter) : all;
-    const corrupt = all.filter((n) => n.healthStatus === "CORRUPT").length;
-    const unsupported = all.filter((n) => n.healthStatus === "UNSUPPORTED").length;
-    return {
-      nodes: filtered.map((n) => ({
-        id: n.id, name: n.name, relativePath: n.relativePath, type: n.type, mimeType: n.mimeType,
-        size: n.size, modifiedAt: n.modifiedAt, healthStatus: n.healthStatus, healthError: n.healthError,
-        sourceVersion: n.sourceVersion,
-      })),
-      summary: { total: all.length, corrupt, unsupported },
+      mediaInfo,
+      browserCompatible: node.browserCompatible,
+      favorite: s.favorites.some((f) => f.fileNodeId === node.id),
+      canWrite: true,
+      activity: s.auditLogs
+        .filter((a) => (a.details as Record<string, unknown>)?.path === node.relativePath || (a.details as Record<string, unknown>)?.dest === node.relativePath)
+        .slice(0, 10)
+        .map((a) => ({ action: a.action, timestamp: a.timestamp, userName: "Demo Owner" })),
     };
   }
 
@@ -232,19 +237,21 @@ function route(method: string, path: string, ctx: Ctx): unknown {
 
   // ── fs ──
   if ((p === "/fs/copy" || p === "/fs/move") && M("POST")) {
-    const { sourcePaths, destDir, action = "skip" } = ctx.body as { sourcePaths: string[]; destDir: string; action?: string };
+    const { sourcePaths, destDir, action = "ask" } = ctx.body as { sourcePaths: string[]; destDir: string; action?: string };
     if (!Array.isArray(sourcePaths) || sourcePaths.length === 0 || destDir == null) throw fail(400, "Invalid parameters");
     const isCopy = p === "/fs/copy";
     const results: unknown[] = [];
     mutate((st) => {
       for (const srcRel of sourcePaths) {
         const src = st.nodes.find((n) => n.relativePath === srcRel && !n.inTrash);
-        if (!src) { results.push({ path: srcRel, error: "Source not found" }); continue; }
+        if (!src) { results.push({ path: srcRel, status: "error", error: "Source not found" }); continue; }
+        if (destDir === srcRel || destDir.startsWith(srcRel + "/")) { results.push({ path: srcRel, status: "error", error: "Can't move a folder into itself" }); continue; }
         const fileName = src.name;
         let targetName = fileName;
-        const collision = childrenOneLevel(destDir).find((n) => n.name === fileName);
+        const collision = childrenOneLevel(destDir).find((n) => n.name === fileName && n.id !== src.id);
         if (collision) {
-          if (action === "skip") { results.push({ path: srcRel, skipped: true }); continue; }
+          if (action === "ask") { results.push({ path: srcRel, status: "conflict", existing: { name: collision.name, type: collision.type } }); continue; }
+          if (action === "skip") { results.push({ path: srcRel, status: "skipped", skipped: true }); continue; }
           if (action === "replace") st.nodes = st.nodes.filter((n) => n.id !== collision.id);
           if (action === "keep_both") targetName = uniqueName(destDir, fileName);
         }
@@ -257,7 +264,7 @@ function route(method: string, path: string, ctx: Ctx): unknown {
           src.name = targetName;
           renameDescendants(srcRel, targetRel);
         }
-        results.push({ path: srcRel, success: true, targetRel });
+        results.push({ path: srcRel, status: "ok", success: true, targetRel, name: targetName });
       }
       st.auditLogs.unshift({ id: nextId("audit"), userId: DEMO_OWNER_ID, action: isCopy ? "COPY" : "MOVE", details: { count: sourcePaths.length }, timestamp: new Date().toISOString() });
     });
@@ -265,13 +272,14 @@ function route(method: string, path: string, ctx: Ctx): unknown {
   }
 
   if (p === "/fs/rename" && M("POST")) {
-    const { sourcePath, newName, action = "skip" } = ctx.body as { sourcePath: string; newName: string; action?: string };
+    const { sourcePath, newName, action = "ask" } = ctx.body as { sourcePath: string; newName: string; action?: string };
     if (!sourcePath || !newName) throw fail(400, "Invalid parameters");
     const dir = sourcePath.includes("/") ? sourcePath.slice(0, sourcePath.lastIndexOf("/")) : "";
     let targetName = newName;
     const collision = childrenOneLevel(dir).find((n) => n.name === newName && n.relativePath !== sourcePath);
     if (collision) {
-      if (action === "skip") return { path: sourcePath, skipped: true };
+      if (action === "ask") throw fail(409, "An item with that name already exists");
+      if (action === "skip") return { path: sourcePath, status: "skipped", skipped: true };
       if (action === "keep_both") targetName = uniqueName(dir, newName);
       if (action === "replace") mutate((st) => { st.nodes = st.nodes.filter((n) => n.id !== collision.id); });
     }
@@ -284,7 +292,7 @@ function route(method: string, path: string, ctx: Ctx): unknown {
       renameDescendants(sourcePath, targetRel);
       st.auditLogs.unshift({ id: nextId("audit"), userId: DEMO_OWNER_ID, action: "RENAME", details: { source: sourcePath, dest: targetRel }, timestamp: new Date().toISOString() });
     });
-    return { path: sourcePath, success: true, targetRel };
+    return { path: sourcePath, status: "ok", success: true, targetRel, name: targetName };
   }
 
   if (p === "/fs/mkdir" && M("POST")) {
@@ -301,7 +309,7 @@ function route(method: string, path: string, ctx: Ctx): unknown {
       });
       st.auditLogs.unshift({ id: nextId("audit"), userId: DEMO_OWNER_ID, action: "MKDIR", details: { path: targetRel }, timestamp: new Date().toISOString() });
     });
-    return { success: true, path: targetRel };
+    return { success: true, path: targetRel, name: finalName };
   }
 
   if (p === "/fs/trash" && M("GET")) {
@@ -324,7 +332,7 @@ function route(method: string, path: string, ctx: Ctx): unknown {
     mutate((st) => {
       for (const relativePath of paths) {
         const node = st.nodes.find((n) => n.relativePath === relativePath && !n.inTrash);
-        if (!node) { results.push({ path: relativePath, error: "Not found" }); continue; }
+        if (!node) { results.push({ path: relativePath, status: "error", error: "Not found" }); continue; }
         const trashFileName = `${nextId("t")}_${node.name}`;
         const newRootRel = `.LoomTrash/${trashFileName}`;
         renameDescendants(relativePath, newRootRel);
@@ -341,7 +349,7 @@ function route(method: string, path: string, ctx: Ctx): unknown {
           deletedByUserId: DEMO_OWNER_ID,
         });
         st.auditLogs.unshift({ id: nextId("audit"), userId: DEMO_OWNER_ID, action: "TRASH", details: { path: relativePath }, timestamp: new Date().toISOString() });
-        results.push({ path: relativePath, success: true });
+        results.push({ path: relativePath, status: "ok", success: true });
       }
     });
     return { results };
@@ -373,32 +381,45 @@ function route(method: string, path: string, ctx: Ctx): unknown {
   }
 
   if (p === "/fs/restore" && M("POST")) {
-    const { fileNodeIds } = ctx.body as { fileNodeIds: string[] };
+    const { fileNodeIds, action = "ask", destDir } = ctx.body as { fileNodeIds: string[]; action?: string; destDir?: string | null };
     if (!Array.isArray(fileNodeIds) || fileNodeIds.length === 0) throw fail(400, "No fileNodeIds provided");
     const results: unknown[] = [];
     mutate((st) => {
       for (const fileNodeId of fileNodeIds) {
         const item = st.trashItems.find((t) => t.fileNodeId === fileNodeId);
-        if (!item) { results.push({ id: fileNodeId, error: "Trash item not found" }); continue; }
-        const collision = st.nodes.find((n) => n.relativePath === item.originalPath && !n.inTrash);
-        if (collision) { results.push({ id: fileNodeId, error: "Conflict: already exists at destination", code: 409 }); continue; }
+        if (!item) { results.push({ id: fileNodeId, path: fileNodeId, status: "error", error: "Trash item not found" }); continue; }
+        const name = item.originalPath.split("/").pop()!;
+        const dir = destDir != null ? destDir : item.originalPath.split("/").slice(0, -1).join("/");
+        let finalName = name;
+        const collision = st.nodes.find((n) => n.relativePath === (dir ? `${dir}/${name}` : name) && !n.inTrash);
+        if (collision) {
+          if (action === "ask") { results.push({ id: fileNodeId, path: item.originalPath, status: "conflict", existing: { name, type: collision.type }, code: 409 }); continue; }
+          if (action === "skip") { results.push({ id: fileNodeId, path: item.originalPath, status: "skipped" }); continue; }
+          if (action === "replace") st.nodes = st.nodes.filter((n) => n.id !== collision.id);
+          if (action === "keep_both") finalName = uniqueName(dir, name);
+        }
+        const target = dir ? `${dir}/${finalName}` : finalName;
         const rootRel = `.LoomTrash/${item.trashPath}`;
         const node = st.nodes.find((n) => n.id === fileNodeId)!;
-        renameDescendants(rootRel, item.originalPath);
+        renameDescendants(rootRel, target);
         for (const n of st.nodes) {
-          if (n.relativePath === item.originalPath || n.relativePath.startsWith(item.originalPath + "/")) n.inTrash = false;
+          if (n.relativePath === target || n.relativePath.startsWith(target + "/")) n.inTrash = false;
         }
-        node.relativePath = item.originalPath;
+        node.relativePath = target;
+        node.name = finalName;
         node.inTrash = false;
         st.trashItems = st.trashItems.filter((t) => t.id !== item.id);
         st.auditLogs.unshift({ id: nextId("audit"), userId: DEMO_OWNER_ID, action: "RESTORE", details: { path: item.originalPath }, timestamp: new Date().toISOString() });
-        results.push({ id: fileNodeId, success: true });
+        results.push({ id: fileNodeId, path: item.originalPath, status: "ok", success: true, targetRel: target, name: finalName });
       }
     });
     return { results };
   }
 
   // ── favorites ──
+  if (p === "/favorites" && M("GET") && ctx.search.get("ids") === "1") {
+    return { ids: s.favorites.map((f) => f.fileNodeId).filter((id) => s.nodes.some((n) => n.id === id && !n.inTrash)) };
+  }
   if (p === "/favorites" && M("GET")) {
     const limit = Math.min(parseInt(ctx.search.get("limit") ?? "100", 10), 500);
     const cursor = ctx.search.get("cursor");
@@ -410,11 +431,13 @@ function route(method: string, path: string, ctx: Ctx): unknown {
     return { favorites: page, nextCursor };
   }
   if (p === "/favorites" && M("POST")) {
-    const { fileNodeId } = ctx.body as { fileNodeId: string };
+    const { fileNodeId, favorite } = ctx.body as { fileNodeId: string; favorite?: boolean };
     let favorited = false;
     mutate((st) => {
       const existing = st.favorites.find((f) => f.fileNodeId === fileNodeId);
-      if (existing) {
+      if (typeof favorite === "boolean" && favorite === !!existing) {
+        favorited = favorite;
+      } else if (existing) {
         st.favorites = st.favorites.filter((f) => f.fileNodeId !== fileNodeId);
         favorited = false;
       } else {
@@ -433,7 +456,7 @@ function route(method: string, path: string, ctx: Ctx): unknown {
     const prefix = folder ? `${folder}/` : "";
     const results = visible(s.nodes)
       .filter((n) => n.name.toLowerCase().includes(q) && (!prefix || n.relativePath.startsWith(prefix)))
-      .slice(0, 50);
+      .slice(0, Math.min(parseInt(ctx.search.get("limit") ?? "50", 10) || 50, 200));
     return { results };
   }
 
@@ -592,6 +615,61 @@ function route(method: string, path: string, ctx: Ctx): unknown {
   if (p === "/thumbnail-cache" && M("DELETE")) {
     mutate((st) => { st.thumbCacheStats = { thumbCount: 0, previewCount: 0, physicalFiles: 0 }; });
     return { success: true };
+  }
+
+  // ── folder sizes / storage / text files (added with the v2 UI) ──
+  if (p === "/files/folder-sizes" && M("GET")) {
+    const base = ctx.search.get("path") ?? "";
+    const prefix = base ? `${base}/` : "";
+    const sizes: Record<string, { size: string; files: number }> = {};
+    for (const n of visible(s.nodes)) {
+      if (n.type !== "FILE" || !n.relativePath.startsWith(prefix)) continue;
+      const rest = n.relativePath.slice(prefix.length);
+      if (!rest.includes("/")) continue;
+      const child = rest.split("/")[0];
+      const cur = sizes[child] ?? { size: "0", files: 0 };
+      sizes[child] = { size: String(Number(cur.size) + Number(n.size ?? 0)), files: cur.files + 1 };
+    }
+    return { path: base, sizes };
+  }
+  if (p === "/storage" && M("GET")) {
+    const total = 2 * 1024 ** 4;
+    const used = visible(s.nodes).reduce((a, n) => a + Number(n.size ?? 0), 0) + 640 * 1024 ** 3;
+    const cats: Record<string, { bytes: string; files: number }> = {};
+    for (const n of visible(s.nodes)) {
+      if (n.type !== "FILE") continue;
+      const m = n.mimeType ?? "";
+      const c = m.startsWith("image/") ? "image" : m.startsWith("video/") ? "video" : m.startsWith("audio/") ? "audio" : /pdf|text|document|sheet|presentation/.test(m) ? "document" : "other";
+      cats[c] = { bytes: String(Number(cats[c]?.bytes ?? 0) + Number(n.size ?? 0)), files: (cats[c]?.files ?? 0) + 1 };
+    }
+    return { media: { total, used, free: total - used }, cache: { total: 512 * 1024 ** 3, used: 38 * 1024 ** 3, free: 474 * 1024 ** 3 }, breakdown: cats, trashBytes: "0" };
+  }
+  if (p === "/files/content" && M("GET")) {
+    const node = findNode(ctx.search.get("path") ?? "");
+    if (!node) throw fail(404, "Not found");
+    const text = demoTextContent.get(node.relativePath) ?? `# ${node.name}\n\nThis is the Loom demo. Nothing you type here is saved anywhere but your browser tab.\n`;
+    return { content: text, version: node.sourceVersion ?? "demo", size: text.length, editable: true };
+  }
+  if (p === "/files/content" && M("PUT")) {
+    const rel = String(ctx.body.path ?? "");
+    demoTextContent.set(rel, String(ctx.body.content ?? ""));
+    return { success: true, version: `demo-${Date.now()}`, size: String(ctx.body.content ?? "").length };
+  }
+  if (p === "/files/content" && M("POST")) {
+    const parent = String(ctx.body.parentPath ?? "");
+    const name = uniqueName(parent, String(ctx.body.name ?? "Untitled.md"));
+    const rel = parent ? `${parent}/${name}` : name;
+    const id = nextId("file");
+    mutate((st) => {
+      st.nodes.push({
+        id, relativePath: rel, name, type: "FILE", mimeType: name.endsWith(".md") ? "text/markdown" : "text/plain", size: "0",
+        modifiedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), indexedAt: new Date().toISOString(),
+        isVisible: true, sourceVersion: `0-${Date.now()}`, browserCompatible: null, healthStatus: "HEALTHY", healthError: null,
+        inTrash: false, contentIdentityId: null, contentIdentity: null,
+      });
+    });
+    demoTextContent.set(rel, "");
+    return { path: rel, name, id };
   }
 
   // ── chunked upload sessions (bytes are "sent" by the XHR shim in mockUpload.ts) ──

@@ -39,7 +39,7 @@ export const IGNORED_NAMES = new Set([
 ]);
 
 export function isIgnoredName(name: string): boolean {
-  return IGNORED_NAMES.has(name) || name.startsWith("._") || name.startsWith(".loom-rename-");
+  return IGNORED_NAMES.has(name) || name.startsWith("._") || name.startsWith(".loom-rename-") || name.startsWith(".loom-edit-");
 }
 
 export const IMAGE_EXTENSIONS = new Set([

@@ -16,14 +16,16 @@ export function AuditPanel() {
   const [expanded, setExpanded] = useState(false);
   const [clearing, setClearing] = useState(false);
 
-  const load = () => {
+  const [cursor, setCursor] = useState<string | null>(null);
+  const load = (more = false) => {
     setLoading(true);
-    fetch("/api/audit")
+    fetch(`/api/audit?limit=50${more && cursor ? `&cursor=${cursor}` : ""}`)
       .then(r => r.json())
-      .then(d => { setLogs(d.logs ?? []); setLoading(false); })
+      .then(d => { setLogs(prev => more ? [...prev, ...(d.logs ?? [])] : (d.logs ?? [])); setCursor(d.nextCursor ?? null); setLoading(false); })
       .catch(() => setLoading(false));
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, []);
 
   const deleteLog = async (id: string) => {
@@ -105,6 +107,14 @@ export function AuditPanel() {
               ) : (
                 <><ChevronDown size={14} /> View all {logs.length} logs</>
               )}
+            </button>
+          )}
+          {expanded && cursor && (
+            <button
+              onClick={() => load(true)}
+              className="w-full py-2 text-sm text-[hsl(var(--primary))] hover:bg-[hsl(var(--accent))] rounded-lg"
+            >
+              Load older entries
             </button>
           )}
         </>

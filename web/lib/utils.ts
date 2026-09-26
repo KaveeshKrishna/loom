@@ -5,9 +5,9 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatBytes(bytes: number | bigint): string {
-  const n = typeof bytes === "bigint" ? Number(bytes) : bytes;
-  if (n === 0) return "0 B";
+export function formatBytes(bytes: number | bigint | string): string {
+  const n = typeof bytes === "number" ? bytes : Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return "0 B";
   const k = 1024;
   const sizes = ["B", "KB", "MB", "GB", "TB"];
   const i = Math.floor(Math.log(n) / Math.log(k));
@@ -43,8 +43,10 @@ export function getFileCategory(
 
   if (filename) {
     const ext = getExtension(filename);
-    if (["thm", "thim", "heic", "avif", "jpg", "jpeg", "png", "gif", "webp"].includes(ext)) return "image";
-    if (["mpg", "mpeg", "mkv", "avi", "wmv", "flv", "mp4", "webm", "mov"].includes(ext)) return "video";
+    if (["thm", "thim", "heic", "heif", "avif", "jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff"].includes(ext)) return "image";
+    if (["mpg", "mpeg", "mkv", "avi", "wmv", "flv", "mp4", "m4v", "webm", "mov", "3gp", "mts", "m2ts"].includes(ext)) return "video";
+    if (["mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "wma", "aiff"].includes(ext)) return "audio";
+    if (["pdf", "txt", "md", "doc", "docx", "odt", "rtf", "xls", "xlsx", "ods", "csv", "ppt", "pptx", "odp", "epub"].includes(ext)) return "document";
   }
 
   return "other";
@@ -92,9 +94,33 @@ export function serializeNodes<T>(nodes: T[]): any[] {
   return deepSerializeBigInt(nodes);
 }
 
-export function sortNodes<T extends { type: string; name: string }>(nodes: T[]): T[] {
+const collator = typeof Intl !== "undefined" ? new Intl.Collator(undefined, { numeric: true, sensitivity: "base" }) : null;
+
+/** Natural-order name comparison: "IMG_2" sorts before "IMG_10". */
+export function compareNames(a: string, b: string): number {
+  return collator ? collator.compare(a, b) : a.localeCompare(b);
+}
+
+type Sortable = { type: string; name: string; size?: string | number | bigint | null; modifiedAt?: string | Date | null; mimeType?: string | null };
+
+/** Folders first, then by the chosen key (name by default). */
+export function sortNodes<T extends Sortable>(nodes: T[], key: "name" | "modified" | "size" | "type" = "name", dir: "asc" | "desc" = "asc"): T[] {
+  const sign = dir === "asc" ? 1 : -1;
+  const time = (v: T["modifiedAt"]) => (v ? new Date(v).getTime() : 0);
   return [...nodes].sort((a, b) => {
-    if (a.type === b.type) return a.name.localeCompare(b.name);
-    return a.type === "DIRECTORY" ? -1 : 1;
+    if (a.type !== b.type) return a.type === "DIRECTORY" ? -1 : 1;
+    let c = 0;
+    if (key === "modified") c = time(a.modifiedAt) - time(b.modifiedAt);
+    else if (key === "size") c = Number(a.size ?? 0) - Number(b.size ?? 0);
+    else if (key === "type") c = compareNames(getExtension(a.name), getExtension(b.name));
+    return (c || compareNames(a.name, b.name)) * (c ? sign : key === "name" ? sign : 1);
   });
+}
+
+export function matchesTypeFilter(n: { type: string; mimeType: string | null; name: string }, filter: string): boolean {
+  if (filter === "all") return true;
+  if (filter === "folders") return n.type === "DIRECTORY";
+  if (n.type === "DIRECTORY") return false;
+  const cat = getFileCategory(n.mimeType, n.name);
+  return filter === "other" ? cat === "other" : cat === filter;
 }

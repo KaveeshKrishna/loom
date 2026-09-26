@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useState, ReactNode } from "react";
 
 export type ClipboardAction = "COPY" | "CUT" | null;
 
@@ -21,20 +21,16 @@ const ClipboardContext = createContext<ClipboardContextType | null>(null);
 export function ClipboardProvider({ children }: { children: ReactNode }) {
   const [clipboard, setClipboard] = useState<ClipboardState>({ action: null, paths: [] });
 
-  const copyToClipboard = (paths: string[]) => {
-    setClipboard({ action: "COPY", paths });
-  };
-
-  const cutToClipboard = (paths: string[]) => {
-    setClipboard({ action: "CUT", paths });
-  };
-
-  const clearClipboard = () => {
-    setClipboard({ action: null, paths: [] });
-  };
+  const copyToClipboard = useCallback((paths: string[]) => setClipboard({ action: "COPY", paths }), []);
+  const cutToClipboard = useCallback((paths: string[]) => setClipboard({ action: "CUT", paths }), []);
+  const clearClipboard = useCallback(() => setClipboard({ action: null, paths: [] }), []);
+  const value = useMemo(
+    () => ({ clipboard, copyToClipboard, cutToClipboard, clearClipboard }),
+    [clipboard, copyToClipboard, cutToClipboard, clearClipboard]
+  );
 
   return (
-    <ClipboardContext.Provider value={{ clipboard, copyToClipboard, cutToClipboard, clearClipboard }}>
+    <ClipboardContext.Provider value={value}>
       {children}
     </ClipboardContext.Provider>
   );

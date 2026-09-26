@@ -1,28 +1,25 @@
 "use client";
-import React from "react";
 
+import React, { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useRef, useCallback } from "react";
-import {
-  Star, FolderOpen, Image, Video, FileText,
-  Settings, ChevronRight, X, MoreVertical, Trash2, ShieldAlert
-} from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { Star, FolderOpen, Image, Video, FileText, Settings, ChevronRight, X, Trash2, ShieldAlert, Clock, Music, PinOff, MoreVertical, Folder } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useTopBar } from "./TopBarContext";
-
-import { useContextMenu } from "@/hooks/useContextMenu";
-import { ContextMenu } from "../files/ContextMenu";
-import type { FileNode } from "@prisma/client";
+import { useNav } from "./TopBarContext";
+import { Menu } from "@/components/files/Menu";
+import { LOOM_DRAG_TYPE } from "@/lib/client/drop";
+import { moveItems, copyItems, trashItems } from "@/components/files/actions";
+import { StorageMeter } from "./StorageMeter";
 
 const navItems = [
   { href: "/files", label: "All Files", icon: FolderOpen },
-  { href: "/favorites", label: "Favorites", icon: Star },
+  { href: "/recent", label: "Recent", icon: Clock },
+  { href: "/favorites", label: "Starred", icon: Star },
   { href: "/photos", label: "Photos", icon: Image },
   { href: "/videos", label: "Videos", icon: Video },
+  { href: "/audio", label: "Audio", icon: Music },
   { href: "/documents", label: "Documents", icon: FileText },
   { href: "/trash", label: "Trash", icon: Trash2 },
-  { href: "/health", label: "File Health", icon: ShieldAlert },
 ];
 
 interface SidebarProps {
@@ -34,142 +31,161 @@ interface SidebarProps {
   collapsed?: boolean;
 }
 
+/** Accept files dragged from the grid; call onPaths with their relative paths. */
+function useDropTarget(onPaths: (paths: string[], copy: boolean) => void) {
+  const [over, setOver] = useState(false);
+  return {
+    over,
+    props: {
+      onDragOver: (e: React.DragEvent) => {
+        if (!e.dataTransfer.types.includes(LOOM_DRAG_TYPE)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = e.altKey || e.ctrlKey ? "copy" : "move";
+        setOver(true);
+      },
+      onDragLeave: () => setOver(false),
+      onDrop: (e: React.DragEvent) => {
+        setOver(false);
+        const raw = e.dataTransfer.getData(LOOM_DRAG_TYPE);
+        if (!raw) return;
+        e.preventDefault();
+        onPaths(JSON.parse(raw), e.altKey || e.ctrlKey);
+      },
+    },
+  };
+}
+
+function NavLink({
+  href,
+  label,
+  icon: Icon,
+  active,
+  collapsed,
+  onClick,
+  dropTo,
+}: {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  active: boolean;
+  collapsed?: boolean;
+  onClick?: () => void;
+  dropTo?: (paths: string[], copy: boolean) => void;
+}) {
+  const drop = useDropTarget(dropTo ?? (() => {}));
+  return (
+    <Link
+      href={href}
+      onClick={onClick}
+      title={collapsed ? label : undefined}
+      {...(dropTo ? drop.props : {})}
+      className={cn(
+        "flex items-center rounded-md text-sm transition-all duration-150 active:scale-[0.98]",
+        collapsed ? "justify-center py-3 px-0" : "gap-2.5 px-3 py-2",
+        active
+          ? "bg-[hsl(var(--sidebar-item-active))] text-[hsl(var(--sidebar-item-active-text))] font-medium"
+          : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--sidebar-item-hover))] hover:text-[hsl(var(--foreground))]",
+        drop.over && "ring-2 ring-[hsl(var(--primary))] bg-[hsl(var(--primary)/0.1)]"
+      )}
+    >
+      <Icon size={collapsed ? 18 : 16} className="shrink-0" />
+      {!collapsed && (
+        <>
+          <span className="truncate">{label}</span>
+          {active && <ChevronRight size={14} className="ml-auto opacity-60" />}
+        </>
+      )}
+    </Link>
+  );
+}
+
 export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, collapsed }: SidebarProps) {
   const pathname = usePathname();
-  const { pins } = useTopBar();
-  const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const longPressFiredRef = useRef(false);
-  const contextMenu = useContextMenu();
-
-  const handleLongPressClear = useCallback(() => {
-    if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
-    longPressFiredRef.current = false;
-  }, []);
-
-  const handleLongPressEnd = useCallback((e: React.TouchEvent) => {
-    if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
-    if (longPressFiredRef.current && e.cancelable) e.preventDefault();
-  }, []);
+  const router = useRouter();
+  const { pins, togglePin } = useNav();
+  const [pinMenu, setPinMenu] = useState<{ x: number; y: number; pin: (typeof pins)[number] } | null>(null);
 
   return (
     <aside
       className={cn(
         "flex flex-col h-full border-r bg-[hsl(var(--sidebar))]",
         collapsed ? "w-16" : "w-56",
-        isMobile && "fixed inset-y-0 left-0 z-[60] shadow-2xl w-56"
+        isMobile && "fixed inset-y-0 left-0 z-[60] shadow-2xl w-64"
       )}
     >
-      {/* Header */}
       <div className={cn("flex items-center h-14 border-b border-[hsl(var(--sidebar-border))]", collapsed ? "justify-center px-0" : "justify-between px-5")}>
-        <div className="flex items-center gap-2.5">
+        <Link href="/files" className="flex items-center gap-2.5" onClick={onClose}>
           <div className="w-7 h-7 rounded-lg bg-[hsl(var(--primary))] flex items-center justify-center shrink-0">
             <span className="text-white text-sm font-bold">L</span>
           </div>
-          {!collapsed && (
-            <span className="text-sm font-semibold tracking-tight text-[hsl(var(--foreground))]">
-              Loom
-            </span>
-          )}
-        </div>
+          {!collapsed && <span className="text-sm font-semibold tracking-tight text-[hsl(var(--foreground))]">Loom</span>}
+        </Link>
         {isMobile && (
-          <button onClick={onClose} className="p-1.5 rounded-md hover:bg-[hsl(var(--accent))]">
+          <button onClick={onClose} className="p-1.5 rounded-md hover:bg-[hsl(var(--accent))]" aria-label="Close menu">
             <X size={16} />
           </button>
         )}
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
-        {navItems.map(({ href, label, icon: Icon }) => {
-          const active = href === "/files"
-            ? pathname === "/files" || pathname.startsWith("/files/")
-            : pathname === href;
-          return (
-            <Link
-              key={href}
-              href={href}
-              onClick={onClose}
-              title={collapsed ? label : undefined}
-              className={cn(
-                "flex items-center rounded-md text-sm transition-all duration-150 active:scale-[0.98]",
-                collapsed ? "justify-center py-3 px-0" : "gap-2.5 px-3 py-2",
-                active
-                  ? "bg-[hsl(var(--sidebar-item-active))] text-[hsl(var(--sidebar-item-active-text))] font-medium"
-                  : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--sidebar-item-hover))] hover:text-[hsl(var(--foreground))]"
-              )}
-            >
-              <Icon size={collapsed ? 18 : 16} />
-              {!collapsed && (
-                <>
-                  {label}
-                  {active && <ChevronRight size={14} className="ml-auto opacity-60" />}
-                </>
-              )}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto" aria-label="Main">
+        {navItems.map(({ href, label, icon }) => (
+          <NavLink
+            key={href}
+            href={href}
+            label={label}
+            icon={icon}
+            collapsed={collapsed}
+            onClick={onClose}
+            active={href === "/files" ? pathname === "/files" || pathname.startsWith("/files/") : pathname === href}
+            dropTo={
+              href === "/files"
+                ? (paths, copy) => (copy ? copyItems(paths, "") : moveItems(paths, ""))
+                : href === "/trash"
+                  ? (paths) => trashItems(paths.map((p) => ({ id: "", relativePath: p, name: p.split("/").pop()! })), { confirm: true })
+                  : undefined
+            }
+          />
+        ))}
 
         {pins.length > 0 && (
           <>
             <div className="my-2 mx-3 border-t border-[hsl(var(--sidebar-border))]" />
+            {!collapsed && <p className="px-3 pb-1 text-[11px] uppercase tracking-wide text-[hsl(var(--muted-foreground))]">Pinned</p>}
             {pins.map((pin) => {
+              const pinPath = pin.path ?? decodeURIComponent(pin.href.replace(/^\/files\/?/, ""));
               const active = pathname === pin.href || pathname.startsWith(`${pin.href}/`);
-              const mockNode = { id: pin.id, type: "DIRECTORY", name: pin.name, relativePath: pin.href.replace("/files/", "") } as FileNode;
-              
               return (
                 <div
                   key={pin.id}
                   className="relative group flex items-center"
-                  onContextMenu={(e: React.MouseEvent) => {
+                  onContextMenu={(e) => {
                     e.preventDefault();
-                    contextMenu.open(e, mockNode);
+                    setPinMenu({ x: e.clientX, y: e.clientY, pin });
                   }}
-                  onTouchStart={(e: React.TouchEvent) => {
-                    longPressFiredRef.current = false;
-                    touchTimerRef.current = setTimeout(() => {
-                      longPressFiredRef.current = true;
-                      contextMenu.open(e, mockNode);
-                    }, 500);
-                  }}
-                  onTouchMove={handleLongPressClear}
-                  onTouchEnd={handleLongPressEnd}
                 >
-                  <Link
-                    href={pin.href}
-                    onClick={(e) => {
-                      if (longPressFiredRef.current) {
-                        e.preventDefault();
-                        return;
-                      }
-                      if (onClose) onClose();
-                    }}
-                    title={collapsed ? pin.name : undefined}
-                    className={cn(
-                      "flex items-center rounded-md text-sm transition-all duration-150 flex-1 min-w-0 active:scale-[0.98]",
-                      collapsed ? "justify-center py-3 px-0" : "gap-2.5 px-3 py-2",
-                      active
-                        ? "bg-[hsl(var(--sidebar-item-active))] text-[hsl(var(--sidebar-item-active-text))] font-medium"
-                        : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--sidebar-item-hover))] hover:text-[hsl(var(--foreground))]"
-                    )}
-                  >
-                    <FolderOpen size={collapsed ? 18 : 16} className="shrink-0" />
-                    {!collapsed && (
-                      <span className="truncate pr-4">{pin.name}</span>
-                    )}
-                  </Link>
+                  <div className="flex-1 min-w-0">
+                    <NavLink
+                      href={pin.href}
+                      label={pin.name}
+                      icon={Folder}
+                      collapsed={collapsed}
+                      onClick={onClose}
+                      active={active}
+                      dropTo={(paths, copy) => (copy ? copyItems(paths, pinPath) : moveItems(paths, pinPath))}
+                    />
+                  </div>
                   {!collapsed && (
-                    <div className="relative shrink-0 pr-2 lg:opacity-0 lg:group-hover:opacity-100 opacity-100 transition-opacity">
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          contextMenu.open(e, mockNode, { current: e.currentTarget as HTMLElement });
-                        }}
-                        className="p-1 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] transition-all"
-                      >
-                        <MoreVertical size={16} />
-                      </button>
-                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        const r = e.currentTarget.getBoundingClientRect();
+                        setPinMenu({ x: r.right, y: r.bottom, pin });
+                      }}
+                      className="absolute right-1 p-1 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] lg:opacity-0 lg:group-hover:opacity-100"
+                      aria-label={`${pin.name} options`}
+                    >
+                      <MoreVertical size={15} />
+                    </button>
                   )}
                 </div>
               );
@@ -177,35 +193,28 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, colla
           </>
         )}
 
+        <div className="my-2 mx-3 border-t border-[hsl(var(--sidebar-border))]" />
         {isOwner && (
-          <>
-            <div className="my-2 mx-3 border-t border-[hsl(var(--sidebar-border))]" />
-            <Link
-              href="/settings"
-              onClick={onClose}
-              title={collapsed ? "Settings" : undefined}
-              className={cn(
-                "flex items-center rounded-md text-sm transition-all duration-150 active:scale-[0.98]",
-                collapsed ? "justify-center py-3 px-0" : "gap-2.5 px-3 py-2",
-                pathname === "/settings" || pathname.startsWith("/settings/")
-                  ? "bg-[hsl(var(--sidebar-item-active))] text-[hsl(var(--sidebar-item-active-text))] font-medium"
-                  : "text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--sidebar-item-hover))] hover:text-[hsl(var(--foreground))]"
-              )}
-            >
-              <Settings size={collapsed ? 18 : 16} />
-              {!collapsed && "Settings"}
-            </Link>
-          </>
+          <NavLink href="/health" label="File Health" icon={ShieldAlert} collapsed={collapsed} onClick={onClose} active={pathname === "/health"} />
+        )}
+        {isOwner && (
+          <NavLink
+            href="/settings"
+            label="Settings"
+            icon={Settings}
+            collapsed={collapsed}
+            onClick={onClose}
+            active={pathname === "/settings" || pathname.startsWith("/settings/")}
+          />
         )}
       </nav>
 
-      {/* Footer */}
-      <div className={cn("px-3 py-3 border-t border-[hsl(var(--sidebar-border))] space-y-2", collapsed && "flex flex-col items-center px-0")}>
+      {!collapsed && <StorageMeter isOwner={isOwner} />}
+
+      <div className={cn("px-3 py-3 border-t border-[hsl(var(--sidebar-border))]", collapsed && "flex flex-col items-center px-0")}>
         <div className={cn("flex items-center", collapsed ? "justify-center" : "gap-2.5 px-1 py-1")}>
           <div className="w-7 h-7 rounded-full bg-[hsl(var(--primary)/0.15)] flex items-center justify-center shrink-0">
-            <span className="text-xs font-semibold text-[hsl(var(--primary))]">
-              {userName.charAt(0).toUpperCase()}
-            </span>
+            <span className="text-xs font-semibold text-[hsl(var(--primary))]">{userName.charAt(0).toUpperCase()}</span>
           </div>
           {!collapsed && (
             <div className="min-w-0">
@@ -215,15 +224,19 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, colla
           )}
         </div>
       </div>
-      
-      {contextMenu.isOpen && contextMenu.node && contextMenu.position && (
-        <ContextMenu 
-          node={contextMenu.node} 
-          position={contextMenu.position} 
-          onClose={contextMenu.close} 
+
+      {pinMenu && (
+        <Menu
+          x={pinMenu.x}
+          y={pinMenu.y}
+          onClose={() => setPinMenu(null)}
+          header={pinMenu.pin.name}
+          items={[
+            { label: "Open", icon: <FolderOpen size={15} />, onClick: () => router.push(pinMenu.pin.href) },
+            { label: "Unpin", icon: <PinOff size={15} />, onClick: () => togglePin(pinMenu.pin) },
+          ]}
         />
       )}
     </aside>
   );
 }
-

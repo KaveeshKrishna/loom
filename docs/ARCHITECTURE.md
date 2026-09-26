@@ -108,6 +108,19 @@ All changes Loom makes to your files go through web/lib/file-ops.ts: rename, mov
 - Permission rules and trash restore locations follow a folder when it's renamed or moved.
 - Case-only renames (photo.jpg → Photo.jpg) work on case-insensitive drives like exFAT.
 
+## Editing text files
+
+The viewer can edit text, code, and Markdown files up to 5 MB (web/app/api/files/content/route.ts).
+
+- **Conflict check.** When you save, the browser sends the version (size and mtime) the file had when you opened it. If the file changed on disk since then, the server answers with a conflict instead of overwriting, and you decide what to do.
+- **Previous version kept.** Before writing, the current contents are copied into .LoomTrash as a "previous version" trash item, so an edit can be undone for 15 days.
+- **Atomic write.** The new contents are written to a temp file in the same folder, flushed to disk, and renamed over the original, so a crash never leaves a half-written file.
+- **Safe rendering.** Markdown is rendered without raw HTML, so a Markdown file can't run scripts.
+
+## Downloads
+
+Single files stream straight from disk with range support. Several items, or a folder, are streamed as one ZIP generated on the fly (web/lib/zip.ts). There are no temp files and no size limit, and archives over 4 GB automatically use ZIP64. Photos, videos, and other already-compressed files are stored without recompression, so zipping a folder of videos costs almost no CPU. Permission rules are checked for every entry.
+
 ## Permissions
 
 There are two roles, Owner and Family. The Owner can see and do everything. What a Family user can reach is controlled by path rules, and the deepest rule that matches a path wins, so rules can be stacked. A rule on `/` is the root rule and covers everything, so "deny /, allow Photos" limits someone to one folder. A Family user with no rules at all can see everything; add rules to restrict them.

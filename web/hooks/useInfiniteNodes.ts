@@ -1,123 +1,103 @@
 "use client";
 
 /**
- * useInfiniteNodes
- *
- * A universal hook for loading paginated media nodes from any API endpoint that
- * supports `?limit=N&cursor=<id>` query parameters and returns `{ [nodesKey], nextCursor }`.
- *
- * Features:
- *  - AbortController: cancels in-flight requests immediately when the caller unmounts
- *    or the URL changes, so navigating away never leaves the browser hung.
- *  - Cursor-based pagination: loads the first `pageSize` items, then appends more
- *    as the IntersectionObserver sentinel scrolls into view.
- *  - decoding="async" should be set on every <img> rendered from these nodes.
+ * useInfiniteNodes — cursor-paginated lists (Photos, Videos, Documents,
+ * Starred). Loads the first page, then more as the sentinel scrolls into
+ * view. Every request is abortable, errors are surfaced, and the list
+ * reloads itself (quietly) when live updates say something changed.
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useDirChanges } from "@/lib/client/live";
 
 export interface InfiniteNodesResult<T> {
   nodes: T[];
   loading: boolean;
   loadingMore: boolean;
   hasMore: boolean;
-  /** Attach this ref to a sentinel <div> at the bottom of the list. */
+  error: { status: number; message: string } | null;
   sentinelRef: React.RefObject<HTMLDivElement | null>;
+  reload: () => void;
 }
 
-/**
- * @param fetchUrl  The full URL including the `?` and any fixed query params
- *                  e.g. "/api/files/type?type=image"
- *                  The hook will append `&limit=N` and `&cursor=ID` automatically.
- * @param nodesKey  The JSON key in the response that holds the array (default: "nodes").
- * @param pageSize  How many items to load per page (default: 100).
- */
-export function useInfiniteNodes<T>(
-  fetchUrl: string,
-  nodesKey = "nodes",
-  pageSize = 100
-): InfiniteNodesResult<T> {
+export function useInfiniteNodes<T>(fetchUrl: string, nodesKey = "nodes", pageSize = 150, map?: (item: unknown) => T): InfiniteNodesResult<T> {
   const [nodes, setNodes] = useState<T[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState<{ status: number; message: string } | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const observerRef = useRef<IntersectionObserver | null>(null);
+  const ctrl = useRef<AbortController | null>(null);
+  const mapRef = useRef(map);
+  mapRef.current = map;
+  const sep = fetchUrl.includes("?") ? "&" : "?";
 
-  // ── Initial page load ──────────────────────────────────────────────────────
+  const fetchPage = useCallback(
+    async (after: string | null, signal: AbortSignal) => {
+      const res = await fetch(`${fetchUrl}${sep}limit=${pageSize}${after ? `&cursor=${encodeURIComponent(after)}` : ""}`, { signal });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { status: res.status });
+      const raw: unknown[] = data[nodesKey] ?? [];
+      return { items: (mapRef.current ? raw.map(mapRef.current) : raw) as T[], next: (data.nextCursor as string | null) ?? null };
+    },
+    [fetchUrl, sep, pageSize, nodesKey]
+  );
+
+  const loadFirst = useCallback(
+    async (silent: boolean) => {
+      ctrl.current?.abort();
+      const c = new AbortController();
+      ctrl.current = c;
+      if (!silent) {
+        setLoading(true);
+        setNodes([]);
+      }
+      try {
+        const { items, next } = await fetchPage(null, c.signal);
+        setNodes((prev) => (silent && prev.length > items.length ? [...items, ...prev.slice(items.length)] : items));
+        setCursor(next);
+        setError(null);
+      } catch (err) {
+        if ((err as Error).name === "AbortError") return;
+        if (!silent) setError({ status: (err as { status?: number }).status ?? 0, message: (err as Error).message });
+      } finally {
+        if (!c.signal.aborted) setLoading(false);
+      }
+    },
+    [fetchPage]
+  );
+
   useEffect(() => {
-    const controller = new AbortController();
-    setLoading(true);
-    setNodes([]);
-    setNextCursor(null);
-    setHasMore(false);
+    loadFirst(false);
+    return () => ctrl.current?.abort();
+  }, [loadFirst]);
 
-    const sep = fetchUrl.includes("?") ? "&" : "?";
-    fetch(`${fetchUrl}${sep}limit=${pageSize}`, { signal: controller.signal })
-      .then((r) => r.json())
-      .then((data) => {
-        const batch: T[] = data[nodesKey] ?? [];
-        setNodes(batch);
-        setNextCursor(data.nextCursor ?? null);
-        setHasMore(!!data.nextCursor);
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (err.name !== "AbortError") setLoading(false);
-        // AbortError is expected on navigation — swallow it silently.
-      });
+  useDirChanges(null, () => loadFirst(true), 1500);
 
-    return () => controller.abort();
-  }, [fetchUrl, nodesKey, pageSize]);
-
-  // ── Load next page ─────────────────────────────────────────────────────────
-  const loadMore = useCallback(() => {
-    if (!nextCursor || loadingMore || !hasMore) return;
-    const controller = new AbortController();
+  const loadMore = useCallback(async () => {
+    if (!cursor || loadingMore) return;
+    const c = new AbortController();
+    ctrl.current = c;
     setLoadingMore(true);
+    try {
+      const { items, next } = await fetchPage(cursor, c.signal);
+      setNodes((prev) => [...prev, ...items]);
+      setCursor(next);
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") setError({ status: 0, message: (err as Error).message });
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [cursor, loadingMore, fetchPage]);
 
-    const sep = fetchUrl.includes("?") ? "&" : "?";
-    fetch(`${fetchUrl}${sep}limit=${pageSize}&cursor=${nextCursor}`, {
-      signal: controller.signal,
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        const batch: T[] = data[nodesKey] ?? [];
-        setNodes((prev) => [...prev, ...batch]);
-        setNextCursor(data.nextCursor ?? null);
-        setHasMore(!!data.nextCursor);
-        setLoadingMore(false);
-      })
-      .catch((err) => {
-        if (err.name !== "AbortError") setLoadingMore(false);
-      });
-
-    // Note: we do NOT return the cleanup here because loadMore is called from an
-    // IntersectionObserver callback, not an effect. The AbortController is held
-    // in closure; if the component unmounts before the response arrives the fetch
-    // will simply be garbage-collected.
-  }, [fetchUrl, nodesKey, pageSize, nextCursor, loadingMore, hasMore]);
-
-  // ── IntersectionObserver sentinel ──────────────────────────────────────────
   useEffect(() => {
-    if (loading) return;
+    if (loading || !cursor) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => entries[0]?.isIntersecting && loadMore(), { rootMargin: "600px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [loading, cursor, loadMore]);
 
-    observerRef.current?.disconnect();
-
-    const sentinel = sentinelRef.current;
-    if (!sentinel || !hasMore) return;
-
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) loadMore();
-      },
-      { rootMargin: "200px" }   // start loading 200px before the sentinel is visible
-    );
-    observerRef.current.observe(sentinel);
-
-    return () => observerRef.current?.disconnect();
-  }, [loading, hasMore, loadMore]);
-
-  return { nodes, loading, loadingMore, hasMore, sentinelRef };
+  return { nodes, loading, loadingMore, hasMore: !!cursor, error, sentinelRef, reload: () => loadFirst(true) };
 }

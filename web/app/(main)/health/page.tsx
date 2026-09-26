@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { filesHref } from "@/lib/client/api";
 import { useTopBar } from "@/components/layout/TopBarContext";
 import {
   Loader2,
@@ -241,7 +242,7 @@ export default function HealthPage() {
                     </pre>
                     <div className="mt-2 flex items-center gap-3">
                       <Link
-                        href={`/files/${node.relativePath.split("/").slice(0, -1).join("/") || ""}`}
+                        href={filesHref(node.relativePath.split("/").slice(0, -1).join("/"))}
                         className="text-xs text-[hsl(var(--primary))] hover:underline"
                         onClick={(e) => e.stopPropagation()}
                       >
