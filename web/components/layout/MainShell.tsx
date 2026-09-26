@@ -14,6 +14,7 @@ import { Toaster } from "@/components/ui/Toaster";
 import { DialogHost } from "@/components/ui/Dialog";
 import { CollisionHost } from "@/components/files/CollisionDialog";
 import { FolderPickerHost } from "@/components/files/FolderPicker";
+import { ShareHost } from "@/components/files/ShareDialog";
 import { registerPinUpdater } from "@/components/files/actions";
 import { cn } from "@/lib/utils";
 
@@ -129,6 +130,7 @@ function MainShellInner({ children, userName, userEmail, isOwner }: MainShellPro
       <DialogHost />
       <CollisionHost />
       <FolderPickerHost />
+      <ShareHost />
     </div>
   );
 }

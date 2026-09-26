@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Star, FolderOpen, Image, Video, FileText, Settings, ChevronRight, X, Trash2, ShieldAlert, Clock, Music, PinOff, MoreVertical, Folder } from "lucide-react";
+import { Star, FolderOpen, Image, Video, FileText, Settings, ChevronRight, X, Trash2, ShieldAlert, Clock, Music, PinOff, MoreVertical, Folder, Link2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNav } from "./TopBarContext";
 import { Menu } from "@/components/files/Menu";
@@ -19,6 +19,7 @@ const navItems = [
   { href: "/videos", label: "Videos", icon: Video },
   { href: "/audio", label: "Audio", icon: Music },
   { href: "/documents", label: "Documents", icon: FileText },
+  { href: "/shared", label: "Shared links", icon: Link2 },
   { href: "/trash", label: "Trash", icon: Trash2 },
 ];
 

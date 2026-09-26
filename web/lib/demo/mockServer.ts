@@ -617,6 +617,13 @@ function route(method: string, path: string, ctx: Ctx): unknown {
     return { success: true };
   }
 
+  // ── sharing (needs a real server; the demo reports it as off) ──
+  if (p === "/shares" && M("GET")) return { enabled: false, links: [] };
+  if (p === "/settings/sharing" && M("GET")) return { enabled: false };
+  if ((p === "/settings/sharing" && M("PUT")) || (p === "/shares" && M("POST"))) {
+    throw fail(400, "Share links need a real Loom server — they aren't available in the demo.");
+  }
+
   // ── folder sizes / storage / text files (added with the v2 UI) ──
   if (p === "/files/folder-sizes" && M("GET")) {
     const base = ctx.search.get("path") ?? "";

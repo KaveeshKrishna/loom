@@ -18,7 +18,9 @@ POSTGRES_PASSWORD is the password for the loom PostgreSQL user, and it's require
 
 ## Login (better-auth)
 
-BETTER_AUTH_SECRET signs login sessions and is required. The installer generates a random 48-byte value. loom-web refuses to start if it's missing, shorter than 32 characters, or still the example value. Changing it logs everyone out. BETTER_AUTH_URL is the public URL Loom is served at, like https://loom.example.com, required in production, it's used to build auth callback URLs. TRUSTED_ORIGINS is a comma-separated list of origins allowed to make logged-in requests, like https://loom.example.com,http://localhost:8085. It's recommended and defaults to empty. List every hostname and port you'll actually use.
+BETTER_AUTH_SECRET signs login sessions and is required. The installer generates a random 48-byte value. loom-web refuses to start if it's missing, shorter than 32 characters, or still the example value. Changing it logs everyone out. BETTER_AUTH_URL is the public URL Loom is served at, like https://loom.example.com. It's required in production: it's used to build auth callback URLs and the share links you hand out (`https://loom.example.com/s/…`). Set it to the address people outside your network will use. TRUSTED_ORIGINS is a comma-separated list of origins allowed to make logged-in requests, like https://loom.example.com,http://localhost:8085. It's recommended and defaults to empty. List every hostname and port you'll actually use.
+
+Share links are off until the Owner enables them in Settings, then Sharing. Links are encrypted with a key derived from BETTER_AUTH_SECRET, so changing the secret doesn't break existing links, but they can't be copied from the UI again.
 
 Public sign-up is always disabled. The first account is created on the setup page, and after that the Owner adds users in Settings, then Users. Sign-in attempts are rate-limited to 10 per minute per IP address.
 

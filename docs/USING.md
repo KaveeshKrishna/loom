@@ -58,6 +58,15 @@ Click a file to open the viewer.
 - **Filters.** The chips in the toolbar (Photos, Videos, Audio, Documents, Folders) filter what you see.
 - **Library-wide views.** The Photos, Videos, Audio, Documents, Starred, and Recent views in the sidebar cover your whole library.
 
+## Share links
+
+Right-click a file or folder and choose **Share link…** to create a link anyone can open without an account.
+
+- **Options.** Give the link an expiry (1 day to never), a password, and choose whether visitors can download. The link is copied as soon as it's created.
+- **Visitors.** Visitors can browse a shared folder, preview its photos, videos, audio, and PDFs, and download files or everything as a ZIP (if allowed).
+- **Managing links.** **Shared links** in the sidebar lists the links you've made. Delete one there and it stops working immediately. Links keep working if the item is renamed or moved, and pause while it's in Trash.
+- **Sharing is off by default.** The Owner turns it on in **Settings → Sharing**, where they can also see and delete everyone's links, or turn sharing off to disable them all at once.
+
 ## Trash
 
 Deleted items stay in Trash for 15 days. From there you can:
@@ -79,5 +88,7 @@ The storage meter at the bottom of the sidebar shows how full your drive is. Own
 - **Settings → Users.** Create accounts. Nobody can sign up on their own.
 - **Settings → Permissions.** Limit Family users to certain folders. For example, deny `/` and allow `Photos`.
 - **Settings → Scanner.** Pick up files you added or changed outside Loom. It also shows background processing and the caches.
+- **Settings → Sharing.** Allow or block public share links, and manage all links.
+- **Settings → Storage.** Drive usage and a breakdown of your library by type.
 - **Settings → Audit Log.** See every change, who made it, and when.
 - **File Health.** Lists files that look damaged or that Loom can't preview.

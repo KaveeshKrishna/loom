@@ -23,7 +23,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Download, FolderInput, Copy, Star, Trash2, X, CheckSquare, Edit2, Scissors, ClipboardPaste, Info, Pin, PinOff,
   FolderOpen, ExternalLink, UploadCloud, FolderUp, FolderPlus, FilePlus, Plus, ArrowUpDown, SlidersHorizontal, Folder,
-  AlertTriangle, Search,
+  AlertTriangle, Search, Share2,
 } from "lucide-react";
 import { cn, formatBytes, sortNodes, matchesTypeFilter } from "@/lib/utils";
 import { filesHref, parentOf } from "@/lib/client/api";
@@ -38,6 +38,7 @@ import { Menu, type MenuItem } from "./Menu";
 import { DetailsPanel } from "./DetailsPanel";
 import { FileGridSkeleton, FileListSkeleton } from "./FileSkeletons";
 import { pickFolder } from "./FolderPicker";
+import { openShareDialog } from "./ShareDialog";
 import {
   moveItems, copyItems, renameItem, trashItems, createFolder, createTextFile, setFavorite, downloadItems,
 } from "./actions";
@@ -245,6 +246,7 @@ export function FileBrowser({
         icon: <Download size={15} />,
         onClick: () => downloadItems(targets),
       });
+      if (!multi) items.push({ label: "Share link…", icon: <Share2 size={15} />, onClick: () => openShareDialog(node) });
       if (!multi) items.push({ label: "Rename", icon: <Edit2 size={15} />, onClick: () => setRenamingId(node.id), shortcut: "F2", separatorBefore: true });
       items.push(
         { label: "Move to…", icon: <FolderInput size={15} />, onClick: () => doMoveTo(targets, false), separatorBefore: multi },

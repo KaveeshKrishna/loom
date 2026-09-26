@@ -95,4 +95,5 @@ Things worth checking with any proxy:
 - **Request size.** Uploads are sent in chunks of 32 MB by default (`LOOM_UPLOAD_CHUNK_MB`), so the proxy only needs to allow requests somewhat larger than one chunk. In nginx that's `client_max_body_size 128m;`. This is also why uploads work through Cloudflare, which caps requests at 100 MB. Keep the chunk size below your proxy's limit.
 - **Timeouts.** The first request for a region of a video can take a few seconds while HLS segments are made, and a very short proxy timeout will cut that off. 60 seconds is a safe minimum.
 - **Live updates.** `/api/events` is a Server-Sent Events stream that stays open. Proxies must not buffer it: `proxy_buffering off` in nginx; Caddy and Cloudflare handle it automatically. If it's buffered, Loom still works, but new thumbnails take a few seconds longer to appear.
-- **Client IP.** Pass `X-Forwarded-For` so sign-in rate limiting applies per visitor rather than to the proxy itself.
+- **Client IP.** Pass `X-Forwarded-For` so sign-in and share-password rate limiting apply per visitor rather than to the proxy itself.
+- **Share links.** `/s/…` pages and `/api/share/…` are meant to be reachable without logging in. If you put extra authentication in front of Loom (Cloudflare Access, Authelia, basic auth), exempt those two paths if you want share links to work for people without an account.

@@ -32,6 +32,7 @@ model User {
   backgroundJobs BackgroundJob[]
   notifications  Notification[]
   uploadSessions UploadSession[]
+  shareLinks     ShareLink[]
 
   @@map("users")
 }
@@ -196,6 +197,7 @@ model FileNode {
   trashItem    TrashItem?
 
   favorites    Favorite[]
+  shareLinks   ShareLink[]
 
   // NOTE: two extra indexes live only in migration SQL because Prisma's
   // schema language cannot express them (see web/prisma/migrations/
@@ -473,6 +475,40 @@ model UploadSession {
   @@index([userId])
   @@index([expiresAt])
   @@map("upload_sessions")
+}
+
+// ─────────────────────────────────────────────
+// SHARE LINKS
+// Public links to one file or folder for people without an account.
+// Disabled unless the Owner turns sharing on (SystemStatus "sharing_enabled").
+//  - The token (256 random bits) is looked up by its SHA-256; an AES-GCM
+//    encrypted copy (key derived from BETTER_AUTH_SECRET) lets the creator
+//    copy the link again later.
+//  - The link follows the FileNode, so it keeps working after a move or
+//    rename, stops while the item is in Trash, and is deleted with it.
+//  - Access is re-checked against the creator's permissions on every request.
+// ─────────────────────────────────────────────
+
+model ShareLink {
+  id             String    @id @default(cuid())
+  tokenHash      String    @unique
+  tokenEnc       String?
+  fileNodeId     String
+  createdById    String
+  passwordHash   String?
+  allowDownload  Boolean   @default(true)
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  lastAccessedAt DateTime?
+  accessCount    Int       @default(0)
+
+  fileNode       FileNode  @relation(fields: [fileNodeId], references: [id], onDelete: Cascade)
+  createdBy      User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([fileNodeId])
+  @@index([createdById])
+  @@map("share_links")
 }
 
 // ─────────────────────────────────────────────

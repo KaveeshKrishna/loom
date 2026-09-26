@@ -19,6 +19,7 @@ Try the [live demo](https://loomdemo.kaveeshkrishna.in). It's a fake version wit
   - Undo for moves, renames and deletes.
   - If a name is already taken, Loom asks: keep both, replace or skip. Replace never destroys anything, because the old item goes to Trash.
 - **Download** single files directly, or any selection of files and folders as one ZIP, streamed on the fly with no size limit.
+- **Share links.** Send anyone a link to a file or folder, no account needed. Links can have an expiry, a password, and a view-only mode, and you can revoke them at any time. Sharing is off until the Owner turns it on.
 - **View and edit:**
   - Full screen viewer with a filmstrip: photos with zoom, pan and slideshow; videos; audio with auto-advance; PDFs.
   - Text, code and Markdown with syntax highlighting.

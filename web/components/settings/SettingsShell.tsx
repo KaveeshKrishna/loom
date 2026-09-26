@@ -2,8 +2,9 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Users, ShieldCheck, ScanLine, ScrollText, HardDrive } from "lucide-react";
+import { Users, ShieldCheck, ScanLine, ScrollText, HardDrive, Link2 } from "lucide-react";
 import { StoragePanel } from "./StoragePanel";
+import { SharingPanel } from "./SharingPanel";
 import { UsersPanel } from "./UsersPanel";
 import { AclPanel } from "./AclPanel";
 import { ScanPanel } from "./ScanPanel";
@@ -15,6 +16,7 @@ const tabs = [
   { id: "users", label: "Users", icon: Users },
   { id: "acl", label: "Permissions", icon: ShieldCheck },
   { id: "scan", label: "Scanner", icon: ScanLine },
+  { id: "sharing", label: "Sharing", icon: Link2 },
   { id: "storage", label: "Storage", icon: HardDrive },
   { id: "audit", label: "Audit Log", icon: ScrollText },
 ];
@@ -79,6 +81,7 @@ function SettingsInner() {
         {activeTab === "users" && <UsersPanel />}
         {activeTab === "acl" && <AclPanel />}
         {activeTab === "scan" && <ScanPanel />}
+        {activeTab === "sharing" && <SharingPanel />}
         {activeTab === "storage" && <StoragePanel />}
         {activeTab === "audit" && <AuditPanel />}
       </div>

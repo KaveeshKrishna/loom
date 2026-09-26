@@ -121,6 +121,19 @@ The viewer can edit text, code, and Markdown files up to 5 MB (web/app/api/files
 
 Single files stream straight from disk with range support. Several items, or a folder, are streamed as one ZIP generated on the fly (web/lib/zip.ts). There are no temp files and no size limit, and archives over 4 GB automatically use ZIP64. Photos, videos, and other already-compressed files are stored without recompression, so zipping a folder of videos costs almost no CPU. Permission rules are checked for every entry.
 
+## Share links
+
+People without an account can open a file or folder through a link like `https://your-loom/s/<token>`. Sharing is **off** until the Owner enables it in Settings, then Sharing, and turning it off disables every link at once.
+
+- **Tokens.** The token is 32 random bytes. The database stores its SHA-256 for lookup, plus an AES-256-GCM encrypted copy (key derived from `BETTER_AUTH_SECRET`) so the creator can copy the link again later. Changing the secret doesn't break existing links; they just can't be shown again.
+- **Options.** A link can have an expiry, a password (bcrypt), and a "view only" mode that refuses downloads and ZIPs.
+- **Password-protected links.** Unlocking one sets a signed cookie that lasts 12 hours and only covers that link. Wrong guesses are rate-limited to 10 per 10 minutes per visitor.
+- **Checks on every request.** The link must not be revoked or expired, the item must not be in Trash, sharing must still be on, and the person who created the link must still be allowed to read everything in it. A Family user who loses access to a folder therefore can't keep a link to it alive.
+- **Confinement.** Paths inside a shared folder are resolved relative to the shared item, so a link can never reach anything outside it.
+- **Links follow the item.** A link points at the FileNode, so it survives renames and moves, pauses while the item is in Trash, and is deleted along with it.
+- **Visitor features.** Visitors can browse shared folders, preview photos, videos (browser-playable ones), audio, and PDFs, and download single files or a ZIP of the folder when allowed.
+- **Logging.** Creating, changing, and deleting links is audit-logged, and each link counts how often it was opened.
+
 ## Permissions
 
 There are two roles, Owner and Family. The Owner can see and do everything. What a Family user can reach is controlled by path rules, and the deepest rule that matches a path wins, so rules can be stacked. A rule on `/` is the root rule and covers everything, so "deny /, allow Photos" limits someone to one folder. A Family user with no rules at all can see everything; add rules to restrict them.
