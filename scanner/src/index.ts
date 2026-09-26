@@ -13,9 +13,10 @@
  * never walks the media folder, so drives can stay asleep.
  */
 import pg from "pg";
-import { mkdir } from "fs/promises";
+import { mkdir, readdir } from "fs/promises";
+import { join } from "path";
 import { prisma, log, setStatus, THUMB_DIR, PREVIEW_DIR, VIDEO_CACHE_DIR, TEMP_DIR } from "./common.js";
-import { runFullRescan } from "./rescan.js";
+import { runFullRescan, repairParentPaths } from "./rescan.js";
 import { processNodeById, indexAndProcessPath } from "./process.js";
 import { runMaintenance } from "./maintenance.js";
 
@@ -135,6 +136,36 @@ async function listenForWakeups() {
   await connect().catch((err) => log("WARN", "LISTEN unavailable, falling back to polling", { error: String(err) }));
 }
 
+/**
+ * loom-web applies database migrations when it starts. After an update the
+ * scanner can start first, so wait until every migration it knows about
+ * (compose.yml mounts web/prisma, including migrations/) has been applied,
+ * rather than failing on columns that don't exist yet.
+ */
+async function waitForMigrations() {
+  let expected: string[];
+  try {
+    const entries = await readdir(join(process.cwd(), "prisma", "migrations"), { withFileTypes: true });
+    expected = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+  } catch {
+    return; // no migrations folder (e.g. local development)
+  }
+  for (let attempt = 0; ; attempt++) {
+    let pending = expected.length;
+    try {
+      const rows = await prisma.$queryRaw<{ migration_name: string }[]>`
+        SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`;
+      const done = new Set(rows.map((r) => r.migration_name));
+      pending = expected.filter((n) => !done.has(n)).length;
+      if (pending === 0) return;
+    } catch {
+      /* table not there yet */
+    }
+    if (attempt % 12 === 0) log("INFO", `Waiting for loom-web to apply database migrations (${pending} pending)`);
+    await new Promise((r) => setTimeout(r, 5_000));
+  }
+}
+
 async function main() {
   log("INFO", `Loom scanner starting (processing concurrency: ${CONCURRENCY})`);
   try {
@@ -147,6 +178,9 @@ async function main() {
     }
     throw err;
   }
+
+  await waitForMigrations();
+  await repairParentPaths();
 
   // Jobs left RUNNING by a crash or restart go back to the queue.
   const recovered = await prisma.scanJob.updateMany({ where: { status: "RUNNING" }, data: { status: "PENDING" } });

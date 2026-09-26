@@ -46,8 +46,23 @@ function likePrefix(s: string) {
   return s.replace(/[\\%_]/g, (c) => "\\" + c) + "/%";
 }
 
+/**
+ * Fix rows whose parentPath doesn't match their relativePath. Only rows
+ * written by an older Loom (e.g. while rolled back after an update) can be
+ * wrong: the column didn't exist then, so they got the default ''. Folders
+ * are listed by parentPath, so without this they'd show up in the root.
+ */
+export async function repairParentPaths(): Promise<void> {
+  const fixed = await prisma.$executeRaw`
+    UPDATE "file_nodes"
+    SET "parentPath" = regexp_replace("relativePath", '/[^/]*$', '')
+    WHERE "parentPath" = '' AND position('/' in "relativePath") > 0`;
+  if (fixed) log("INFO", `Repaired the parent folder of ${fixed} index row(s) written by an older version`);
+}
+
 export async function runFullRescan(jobId: string): Promise<void> {
   log("INFO", "FULL_RESCAN started", { jobId });
+  await repairParentPaths();
   await setStatus("scanner_status", "scanning");
   const stats: Stats = { dirsChecked: 0, filesChecked: 0, filesAdded: 0, filesChanged: 0, removed: 0, queued: 0, errors: 0 };
   const changedDirs = new Set<string>();

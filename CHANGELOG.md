@@ -35,6 +35,7 @@ A big release: fast uploads, a new file browser, editing, share links, and a saf
 - Photos are rotated correctly using their EXIF orientation. Camera, date taken, lens and GPS location are shown in the details panel. Videos show duration, resolution and codecs.
 - Rescans are much faster on big libraries and don't rehash unchanged files.
 - Interrupted jobs are picked up again after a restart.
+- After an update the scanner waits for loom-web to finish the database migration instead of failing and restarting.
 
 ### File browser
 

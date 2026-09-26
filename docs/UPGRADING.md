@@ -38,7 +38,7 @@ Read CHANGELOG.md before a big update. Anything you need to do by hand is listed
 
 This moves the code back to the version you had before the last update, rebuilds and restarts. It also offers to restore the database backup taken just before that update. You usually don't need that: Loom's database changes only ever add things, so the older version runs fine on the updated database. Restore it only if the update failed while changing the database. Restoring loses whatever changed in the database since the update (new users, favorites, share links). Your files on disk stay as they are either way.
 
-After a rollback, update.sh will offer the same version again next time and warn you that you rolled back from it. Wait for a fixed version.
+After a rollback, update.sh will offer the same version again next time and warn you that you rolled back from it. Wait for a fixed version. Anything the older version added to the index in the meantime is fixed up automatically when you update again.
 
 ## Backups and restores
 
