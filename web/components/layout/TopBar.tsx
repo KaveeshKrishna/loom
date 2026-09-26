@@ -30,6 +30,15 @@ function useTheme() {
     document.documentElement.classList.toggle("dark", isDark);
   }, []);
 
+  // "System" follows the OS when it switches between light and dark.
+  useEffect(() => {
+    if (theme !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => document.documentElement.classList.toggle("dark", mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [theme]);
+
   const applyTheme = useCallback((t: Theme) => {
     setTheme(t);
     localStorage.setItem("loom-theme", t);
@@ -41,7 +50,47 @@ function useTheme() {
   return { theme, applyTheme };
 }
 
-import { useTopBar } from "./TopBarContext";
+import { useViewPrefs, useSearch, useNav, type Breadcrumb } from "./TopBarContext";
+import { LOOM_DRAG_TYPE } from "@/lib/client/drop";
+import { moveItems, copyItems } from "@/components/files/actions";
+
+/** A breadcrumb you can drop files onto to move them there. */
+function CrumbLink({ crumb, last }: { crumb: Breadcrumb; last: boolean }) {
+  const [over, setOver] = useState(false);
+  const droppable = crumb.path !== undefined && !last;
+  return (
+    <Link
+      href={crumb.href}
+      className={cn(
+        "hover:text-[hsl(var(--foreground))] transition-colors rounded px-1 -mx-1",
+        last && "text-[hsl(var(--foreground))] font-medium",
+        over && "bg-[hsl(var(--primary)/0.15)] text-[hsl(var(--foreground))] ring-1 ring-[hsl(var(--primary))]"
+      )}
+      title={crumb.label}
+      {...(droppable
+        ? {
+            onDragOver: (e: React.DragEvent) => {
+              if (!e.dataTransfer.types.includes(LOOM_DRAG_TYPE)) return;
+              e.preventDefault();
+              setOver(true);
+            },
+            onDragLeave: () => setOver(false),
+            onDrop: (e: React.DragEvent) => {
+              setOver(false);
+              const raw = e.dataTransfer.getData(LOOM_DRAG_TYPE);
+              if (!raw) return;
+              e.preventDefault();
+              const paths: string[] = JSON.parse(raw);
+              if (e.altKey || e.ctrlKey) copyItems(paths, crumb.path!);
+              else moveItems(paths, crumb.path!);
+            },
+          }
+        : {})}
+    >
+      {truncateName(crumb.label, 24)}
+    </Link>
+  );
+}
 
 export function TopBar({ onMenuToggle, userName }: TopBarProps) {
   const router = useRouter();
@@ -50,7 +99,22 @@ export function TopBar({ onMenuToggle, userName }: TopBarProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const { theme, applyTheme } = useTheme();
-  const { viewMode, setViewMode, gridSize, setGridSize, breadcrumbs, searchQuery, setSearchQuery, searchGlobal, setSearchGlobal } = useTopBar();
+  const { viewMode, setViewMode, gridSize, setGridSize } = useViewPrefs();
+  const { searchQuery, setSearchQuery, searchGlobal, setSearchGlobal } = useSearch();
+  const { breadcrumbs } = useNav();
+
+  // "/" focuses the search box (like Drive and GitHub).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey) return;
+      const t = e.target as HTMLElement;
+      if (t.closest("input, textarea, [contenteditable=true]")) return;
+      e.preventDefault();
+      document.getElementById("topbar-search")?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
   const [gridMenuOpen, setGridMenuOpen] = useState(false);
   const gridMenuRef = useRef<HTMLDivElement>(null);
   
@@ -65,15 +129,23 @@ export function TopBar({ onMenuToggle, userName }: TopBarProps) {
         const data = await res.json();
         setNotifications(data);
       }
-    } catch (e) {
-      console.error("Failed to fetch notifications", e);
+    } catch {
+      /* offline or navigating away — try again on the next tick */
     }
   }, []);
 
   useEffect(() => {
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30000); // poll every 30s
-    return () => clearInterval(interval);
+    // Poll gently, and not at all while the tab is in the background.
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") fetchNotifications();
+    }, 60_000);
+    const onVisible = () => document.visibilityState === "visible" && fetchNotifications();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [fetchNotifications]);
 
   const dismissNotification = async (id?: string) => {
@@ -154,11 +226,12 @@ export function TopBar({ onMenuToggle, userName }: TopBarProps) {
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
+          aria-label="Search"
           placeholder={
             searchGlobal || (breadcrumbs.length === 1 && breadcrumbs[0].href === "/files")
-              ? "Search all files..."
+              ? "Search all files  ( / )"
               : breadcrumbs.length > 0
-              ? `Search ${truncateName(breadcrumbs[breadcrumbs.length - 1].label, 15)} folder`
+              ? `Search in ${truncateName(breadcrumbs[breadcrumbs.length - 1].label, 15)}`
               : "Search files..."
           }
           className="w-full pl-9 pr-4 py-2 md:py-1.5 text-base md:text-sm bg-[hsl(var(--accent))] rounded-xl md:rounded-lg border border-transparent focus:border-[hsl(var(--primary)/0.4)] focus:bg-[hsl(var(--background))] focus:outline-none transition-all text-ellipsis overflow-hidden whitespace-nowrap"
@@ -186,16 +259,7 @@ export function TopBar({ onMenuToggle, userName }: TopBarProps) {
               return (
                 <span key={`${crumb.href}-${i}`} className="flex items-center gap-1 shrink-0">
                   {i > 0 && <span className="opacity-40">/</span>}
-                  <Link
-                    href={crumb.href}
-                    className={cn(
-                      "hover:text-[hsl(var(--foreground))] transition-colors",
-                      i === visibleBreadcrumbs.length - 1 && "text-[hsl(var(--foreground))] font-medium"
-                    )}
-                    title={crumb.label}
-                  >
-                    {truncateName(crumb.label, 15)}
-                  </Link>
+                  <CrumbLink crumb={crumb} last={i === visibleBreadcrumbs.length - 1} />
                 </span>
               );
             })}

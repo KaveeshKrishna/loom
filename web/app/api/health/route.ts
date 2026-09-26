@@ -2,20 +2,24 @@
  * GET /api/health
  *
  * Unauthenticated liveness/readiness probe. Used by the Docker Compose
- * healthcheck and by installer scripts to know when the app is actually
- * ready to serve traffic (not just that the process has started).
+ * healthcheck and by the install/update scripts to know when the app is
+ * actually ready to serve traffic (not just that the process has started).
  *
- * Intentionally does not require a session or leak any details beyond
- * "database reachable or not" — this endpoint is reachable pre-auth.
+ * Reveals only "database reachable or not" and the Loom version (the source
+ * is public, so the version isn't a secret; the update script uses it to
+ * confirm the new version is the one running).
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import pkg from "@/package.json";
+
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    return NextResponse.json({ status: "ok" }, { status: 200 });
+    return NextResponse.json({ status: "ok", version: pkg.version }, { status: 200 });
   } catch {
-    return NextResponse.json({ status: "unavailable" }, { status: 503 });
+    return NextResponse.json({ status: "unavailable", version: pkg.version }, { status: 503 });
   }
 }

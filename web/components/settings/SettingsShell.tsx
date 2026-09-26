@@ -1,24 +1,49 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Users, ShieldCheck, ScanLine, ScrollText } from "lucide-react";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Users, ShieldCheck, ScanLine, ScrollText, HardDrive, Link2 } from "lucide-react";
+import { StoragePanel } from "./StoragePanel";
+import { SharingPanel } from "./SharingPanel";
 import { UsersPanel } from "./UsersPanel";
 import { AclPanel } from "./AclPanel";
 import { ScanPanel } from "./ScanPanel";
 import { AuditPanel } from "./AuditPanel";
 import { cn } from "@/lib/utils";
-import { useTopBar } from "@/components/layout/TopBarContext";
+import { useNav } from "@/components/layout/TopBarContext";
 
 const tabs = [
   { id: "users", label: "Users", icon: Users },
   { id: "acl", label: "Permissions", icon: ShieldCheck },
   { id: "scan", label: "Scanner", icon: ScanLine },
+  { id: "sharing", label: "Sharing", icon: Link2 },
+  { id: "storage", label: "Storage", icon: HardDrive },
   { id: "audit", label: "Audit Log", icon: ScrollText },
 ];
 
 export function SettingsShell() {
-  const [activeTab, setActiveTab] = useState("users");
-  const { setBreadcrumbs } = useTopBar();
+  // useSearchParams needs a Suspense boundary for static rendering (demo build).
+  return (
+    <Suspense fallback={null}>
+      <SettingsInner />
+    </Suspense>
+  );
+}
+
+function SettingsInner() {
+  // The active tab lives in the URL (?tab=...) so it survives reloads and can be linked to.
+  const params = useSearchParams();
+  const router = useRouter();
+  const fromUrl = params.get("tab");
+  const [activeTab, setActiveTabState] = useState(tabs.some((t) => t.id === fromUrl) ? fromUrl! : "users");
+  const setActiveTab = (id: string) => {
+    setActiveTabState(id);
+    router.replace(`/settings?tab=${id}`, { scroll: false });
+  };
+  useEffect(() => {
+    if (fromUrl && tabs.some((t) => t.id === fromUrl)) setActiveTabState(fromUrl);
+  }, [fromUrl]);
+  const { setBreadcrumbs } = useNav();
 
   useEffect(() => {
     setBreadcrumbs([{ label: "Settings", href: "/settings" }]);
@@ -56,6 +81,8 @@ export function SettingsShell() {
         {activeTab === "users" && <UsersPanel />}
         {activeTab === "acl" && <AclPanel />}
         {activeTab === "scan" && <ScanPanel />}
+        {activeTab === "sharing" && <SharingPanel />}
+        {activeTab === "storage" && <StoragePanel />}
         {activeTab === "audit" && <AuditPanel />}
       </div>
     </div>

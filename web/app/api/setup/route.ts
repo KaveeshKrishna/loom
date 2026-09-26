@@ -1,77 +1,48 @@
 /**
- * POST /api/setup
+ * GET  /api/setup — { needsSetup } (true only while no user exists)
+ * POST /api/setup { name, email, password } — create the first account as Owner.
  *
- * Creates the first user account and promotes it to OWNER. This replaces
- * the old build-time `prisma/seed.ts` script, which required OWNER_EMAIL /
- * OWNER_PASSWORD in .env and couldn't run reliably at image-build time.
- *
- * SECURITY: this endpoint is intentionally unauthenticated (there is no one
- * to authenticate as on a fresh install) but MUST hard-refuse once any user
- * exists — otherwise it is a permanent unauthenticated privilege-escalation
- * endpoint. That check is the authoritative guard; the /setup page's own
- * redirect is a convenience, not the security boundary.
+ * SECURITY: unauthenticated by necessity, so it hard-refuses once any user
+ * exists. The check and the insert run in one transaction holding a
+ * Postgres advisory lock, so two simultaneous requests can't both succeed.
  */
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { NextResponse } from "next/server";
+import { hashPassword } from "better-auth/crypto";
 import { prisma } from "@/lib/prisma";
+import { route, readJson, badRequest, HttpError } from "@/lib/http";
 
-export async function GET() {
+const SETUP_LOCK_KEY = 7_726_001; // arbitrary constant for pg_advisory_xact_lock
+
+export const GET = route(async () => {
   const userCount = await prisma.user.count();
   return NextResponse.json({ needsSetup: userCount === 0 });
-}
+});
 
-export async function POST(req: NextRequest) {
-  const userCount = await prisma.user.count();
-  if (userCount > 0) {
-    return NextResponse.json(
-      { error: "Setup has already been completed." },
-      { status: 403 }
-    );
-  }
+export const POST = route(async (req) => {
+  const { name, email, password } = await readJson<Record<string, unknown>>(req);
+  if (typeof name !== "string" || !name.trim()) throw badRequest("Name, email, and password are all required.");
+  if (typeof email !== "string" || !/^[^\s@]+@[^\s@]+$/.test(email)) throw badRequest("A valid email is required.");
+  if (typeof password !== "string" || password.length < 8) throw badRequest("Password must be at least 8 characters.");
 
-  const { name, email, password } = await req.json();
+  const hash = await hashPassword(password);
+  const normalizedEmail = email.trim().toLowerCase();
 
-  if (!name || !email || !password) {
-    return NextResponse.json(
-      { error: "Name, email, and password are all required." },
-      { status: 400 }
-    );
-  }
-  if (typeof password !== "string" || password.length < 8) {
-    return NextResponse.json(
-      { error: "Password must be at least 8 characters." },
-      { status: 400 }
-    );
-  }
-
-  try {
-    await auth.api.signUpEmail({ body: { email, password, name } });
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed to create account." },
-      { status: 400 }
-    );
-  }
-
-  // Re-check under a race: if two setup requests land concurrently, only
-  // the first should end up as OWNER. Recount before promoting.
-  const recount = await prisma.user.count();
-  if (recount > 1) {
-    // Someone else's request created the owner first; leave this new user
-    // as FAMILY rather than granting two owners.
-    return NextResponse.json({ success: true, owner: false });
-  }
-
-  await prisma.user.update({
-    where: { email },
-    data: { role: "OWNER" },
-  });
-
-  await prisma.systemStatus.upsert({
-    where: { key: "scanner_status" },
-    update: {},
-    create: { key: "scanner_status", value: "idle" },
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SETUP_LOCK_KEY})`;
+    if ((await tx.user.count()) > 0) throw new HttpError(403, "Setup has already been completed.");
+    const user = await tx.user.create({
+      data: { name: name.trim(), email: normalizedEmail, password: hash, role: "OWNER" },
+    });
+    await tx.account.create({
+      data: { accountId: user.id, providerId: "credential", userId: user.id, password: hash },
+    });
+    await tx.systemStatus.upsert({
+      where: { key: "scanner_status" },
+      update: {},
+      create: { key: "scanner_status", value: "idle" },
+    });
+    await tx.auditLog.create({ data: { userId: user.id, action: "SETUP_COMPLETED", details: {} } });
   });
 
   return NextResponse.json({ success: true, owner: true });
-}
+});

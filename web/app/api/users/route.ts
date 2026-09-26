@@ -1,65 +1,46 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+/**
+ * GET  /api/users — list users (Owner only)
+ * POST /api/users { name, email, password, role } — create a user (Owner only).
+ * Public sign-up is disabled; this is the only way new accounts are made.
+ */
+import { NextResponse } from "next/server";
 import { hashPassword } from "better-auth/crypto";
-import { headers } from "next/headers";
+import { prisma } from "@/lib/prisma";
+import { route, requireOwner, readJson, badRequest, conflict } from "@/lib/http";
 
-async function requireOwner() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session?.user) return null;
-  const user = await prisma.user.findUnique({ where: { email: session.user.email! } });
-  if (!user || user.role !== "OWNER") return null;
-  return user;
-}
-
-export async function GET() {
-  const owner = await requireOwner();
-  if (!owner) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
+export const GET = route(async () => {
+  await requireOwner();
   const users = await prisma.user.findMany({
     select: { id: true, name: true, email: true, role: true, createdAt: true },
     orderBy: { createdAt: "asc" },
   });
-
   return NextResponse.json({ users });
-}
+});
 
-export async function POST(req: NextRequest) {
+export const POST = route(async (req) => {
   const owner = await requireOwner();
-  if (!owner) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const { name, email, password, role } = await readJson<Record<string, unknown>>(req);
+  if (typeof name !== "string" || !name.trim()) throw badRequest("Name is required");
+  if (typeof email !== "string" || !/^[^\s@]+@[^\s@]+$/.test(email)) throw badRequest("A valid email is required");
+  if (typeof password !== "string" || password.length < 8) throw badRequest("Password must be at least 8 characters");
+  const normalizedEmail = email.trim().toLowerCase();
 
-  const { name, email, password, role } = await req.json();
-  if (!name || !email || !password) {
-    return NextResponse.json({ error: "name, email, and password are required" }, { status: 400 });
-  }
+  if (await prisma.user.findUnique({ where: { email: normalizedEmail } })) throw conflict("Email already in use");
 
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
-    return NextResponse.json({ error: "Email already in use" }, { status: 409 });
-  }
-
-  // Use Better Auth's own hashPassword so the hash format matches what
-  // Better Auth's verifyPassword expects during sign-in.
+  // Better Auth's own hashPassword, so its sign-in verification accepts it.
   const hash = await hashPassword(password);
-
-  const user = await prisma.user.create({
-    data: { name, email, password: hash, role: role === "OWNER" ? "OWNER" : "FAMILY" },
-    select: { id: true, name: true, email: true, role: true, createdAt: true },
+  const user = await prisma.$transaction(async (tx) => {
+    const u = await tx.user.create({
+      data: { name: name.trim(), email: normalizedEmail, password: hash, role: role === "OWNER" ? "OWNER" : "FAMILY" },
+      select: { id: true, name: true, email: true, role: true, createdAt: true },
+    });
+    await tx.account.create({
+      data: { accountId: u.id, providerId: "credential", userId: u.id, password: hash },
+    });
+    await tx.auditLog.create({
+      data: { userId: owner.id, action: "USER_CREATED", details: { targetEmail: normalizedEmail, role: u.role } },
+    });
+    return u;
   });
-
-  // Create the credential account row that Better Auth looks up on sign-in.
-  await prisma.account.create({
-    data: {
-      accountId: user.id,
-      providerId: "credential",
-      userId: user.id,
-      password: hash,
-    },
-  });
-
-  await prisma.auditLog.create({
-    data: { userId: owner.id, action: "USER_CREATED", details: { targetEmail: email } },
-  });
-
   return NextResponse.json({ user });
-}
+});

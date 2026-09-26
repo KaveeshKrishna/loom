@@ -1,6 +1,6 @@
 {
   "name": "loom-scanner",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,12 +10,15 @@
   },
   "dependencies": {
     "@prisma/client": "^6.11.1",
+    "exif-reader": "2.0.3",
     "mime-types": "2.1.35",
-    "sharp": "0.34.3"
+    "pg": "8.23.0",
+    "sharp": "0.35.4"
   },
   "devDependencies": {
     "@types/mime-types": "2.1.4",
     "@types/node": "22.15.30",
+    "@types/pg": "8.23.1",
     "prisma": "^6.11.1",
     "tsx": "4.20.3",
     "typescript": "5.8.3"

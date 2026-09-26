@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { api, filesHref } from "@/lib/client/api";
+import { toast } from "@/components/ui/Toaster";
 import { useTopBar } from "@/components/layout/TopBarContext";
 import {
   Loader2,
@@ -10,6 +12,7 @@ import {
   CheckCircle2,
   FileWarning,
   RefreshCw,
+  RotateCcw,
   Search,
 } from "lucide-react";
 import { formatBytes } from "@/lib/utils";
@@ -69,6 +72,26 @@ export default function HealthPage() {
     }
   };
 
+  const [rechecking, setRechecking] = useState(false);
+  const recheck = async (ids: string[]) => {
+    if (!ids.length) return;
+    setRechecking(true);
+    try {
+      const r = await api<{ queued: number }>("/api/files/health", { method: "POST", json: { fileNodeIds: ids } });
+      if (r.queued === 0) {
+        toast.info("Loom can't generate previews for these file types, so there's nothing to re-check.");
+      } else {
+        toast.success(`Checking ${r.queued} file${r.queued === 1 ? "" : "s"} again. Fixed files leave this list once they've been processed.`);
+        setNodes((prev) => prev.filter((n) => !ids.includes(n.id) || n.healthStatus === "UNSUPPORTED"));
+        setTimeout(fetchHealth, 5000);
+      }
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setRechecking(false);
+    }
+  };
+
   const filteredNodes = useMemo(() => {
     let result = nodes;
     if (filter !== "ALL") result = result.filter((n) => n.healthStatus === filter);
@@ -112,6 +135,16 @@ export default function HealthPage() {
               Files that Loom could not fully analyze or generate previews for.
             </p>
           </div>
+          <div className="flex items-center gap-2">
+          <button
+            onClick={() => recheck(filteredNodes.map((n) => n.id))}
+            disabled={loading || rechecking || filteredNodes.length === 0}
+            title="Analyze the listed files again, e.g. after replacing them or updating Loom"
+            className="flex items-center gap-2 px-3 py-2 text-sm rounded-md border border-[hsl(var(--border))] hover:bg-[hsl(var(--accent))] transition-colors disabled:opacity-50"
+          >
+            <RotateCcw size={14} className={rechecking ? "animate-spin" : ""} />
+            Check again
+          </button>
           <button
             onClick={fetchHealth}
             disabled={loading}
@@ -120,6 +153,7 @@ export default function HealthPage() {
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
             Refresh
           </button>
+          </div>
         </div>
 
         {/* Summary Cards */}
@@ -240,8 +274,15 @@ export default function HealthPage() {
                       {node.healthError}
                     </pre>
                     <div className="mt-2 flex items-center gap-3">
+                      <button
+                        onClick={() => recheck([node.id])}
+                        disabled={rechecking}
+                        className="text-xs text-[hsl(var(--primary))] hover:underline disabled:opacity-50"
+                      >
+                        Check again
+                      </button>
                       <Link
-                        href={`/files/${node.relativePath.split("/").slice(0, -1).join("/") || ""}`}
+                        href={filesHref(node.relativePath.split("/").slice(0, -1).join("/"))}
                         className="text-xs text-[hsl(var(--primary))] hover:underline"
                         onClick={(e) => e.stopPropagation()}
                       >

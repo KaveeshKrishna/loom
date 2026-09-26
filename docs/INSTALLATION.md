@@ -14,9 +14,16 @@ cd loom
 ./scripts/install.sh
 ```
 
-The script checks Docker and Docker Compose are there, asks where your files are and where the cache goes plus the bind address, port, and your public URL, makes .env from .env.example with random secrets, creates the media and cache folders if they're missing and fixes ownership on the cache folder (if that fails, see [Troubleshooting](TROUBLESHOOTING.md#permission-denied-writing-to-cache)), builds the images and starts the containers, and waits for /api/health to say it's ready.
+The script:
 
-You can re-run it any time, it won't touch an existing .env or restart running containers.
+- Checks Docker and Docker Compose are there and running.
+- Asks where your files are and where the cache goes, plus the bind address, port, and your public URL.
+- Refuses a cache folder that is the media folder or inside it, since Loom deletes cache files freely. If the media folder doesn't exist, it asks before creating it, so a typo doesn't leave you with an empty library.
+- Makes .env from .env.example with random secrets.
+- Creates the media and cache folders if they're missing and gives the cache folder to uid 1000 (if that fails, see [Troubleshooting](TROUBLESHOOTING.md#permission-denied-writing-to-cache)). It never changes ownership of an existing media folder: that's your data.
+- Builds the images, starts the containers, and waits for /api/health to say it's ready.
+
+You can re-run it any time. It uses the settings in an existing .env instead of asking again, and never overwrites it. It stops if that .env still has an example password or secret in it.
 
 For a non-interactive install, in CI or a script, set the variables first and pass --non-interactive:
 
@@ -50,11 +57,19 @@ docker compose up -d
 
 Migrations run when the container starts (see web/docker-entrypoint.sh), there's no separate migration step.
 
+## Permissions
+
+Both containers run as uid 1000 (the node user), never as root. uid 1000 must be able to read your media folder to show it, and write to it for uploads, renames, moves, edits and Trash. The simplest setup is a media folder owned by uid 1000, which is the first normal user on most Linux systems. If yours belongs to someone else, give uid 1000 access with group permissions or ACLs rather than changing the owner of everything. The cache folder must be writable by uid 1000.
+
 ## First login
 
 Open Loom in a browser. A fresh install with no users shows a setup page instead of a login form, make your account there. That first account becomes the Owner, which can do everything. Once any account exists, the setup page redirects to login, so nobody can use it to make a second Owner later.
 
 More accounts, made under Settings then Users as the Owner, get the Family role by default. You can limit what they see per folder in Settings, then Permissions.
+
+## Updating
+
+Run `./scripts/update.sh` from the Loom folder. See [Upgrading](UPGRADING.md).
 
 ## Next
 

@@ -1,27 +1,15 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+/** GET /api/notifications?unread=true — the caller's notifications (newest 50). */
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { route, requireUser } from "@/lib/http";
 
-export async function GET(req: NextRequest) {
-  try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const unreadOnly = req.nextUrl.searchParams.get("unread") === "true";
-
-    const notifications = await prisma.notification.findMany({
-      where: { 
-        userId: session.user.id,
-        ...(unreadOnly ? { read: false } : {})
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
-
-    return NextResponse.json(notifications);
-  } catch (err: unknown) {
-    console.error("Notifications API Error:", err);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
-  }
-}
+export const GET = route(async (req) => {
+  const user = await requireUser();
+  const unreadOnly = req.nextUrl.searchParams.get("unread") === "true";
+  const notifications = await prisma.notification.findMany({
+    where: { userId: user.id, ...(unreadOnly ? { read: false } : {}) },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+  return NextResponse.json(notifications);
+});

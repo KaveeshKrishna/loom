@@ -2,11 +2,10 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 
-# Install build tools for native modules (sharp) and ffmpeg
-RUN apk add --no-cache libc6-compat ffmpeg
+RUN apk add --no-cache libc6-compat
 
-COPY package.json ./
-RUN npm install --legacy-peer-deps
+COPY package.json package-lock.json ./
+RUN npm ci --legacy-peer-deps --no-audit --no-fund
 
 # ── Stage 2: Builder ──────────────────────────────────────────────────────────
 FROM node:22-alpine AS builder
@@ -51,8 +50,11 @@ COPY --from=builder --chown=node:node /app/node_modules/@prisma ./node_modules/@
 # Keep this version in sync with the "prisma" devDependency in package.json.
 RUN mkdir -p /opt/prisma-cli && \
     cd /opt/prisma-cli && \
-    npm install prisma@6.11.1 --no-save --no-audit --no-fund && \
+    npm install prisma@6.11.1 --no-save --no-audit --no-fund --no-update-notifier && \
     chown -R node:node /opt/prisma-cli
+
+# Admin helpers, e.g. scripts/reset-password.mjs (see docs/TROUBLESHOOTING.md)
+COPY --from=builder /app/scripts ./scripts
 
 COPY --chown=node:node docker-entrypoint.sh ./docker-entrypoint.sh
 

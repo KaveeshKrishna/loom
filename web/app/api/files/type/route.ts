@@ -1,66 +1,44 @@
-import { NextRequest, NextResponse } from "next/server";
+/**
+ * GET /api/files/type?type=image|video|audio|document&cursor=&limit=
+ * Library-wide category views, newest first, paginated by cursor.
+ */
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { auth } from "@/lib/auth";
-import { checkAccess } from "@/lib/acl";
-import { serializeNodes } from "@/lib/utils";
-import { headers } from "next/headers";
+import { route, requireUser, intParam } from "@/lib/http";
+import { getAcl } from "@/lib/acl";
+import { categoryWhere } from "@/lib/categories";
+import { nodeInclude, serializeListed, type ListedNode } from "@/lib/listing";
 
-export async function GET(req: NextRequest) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const user = await prisma.user.findUnique({ where: { email: session.user.email! } });
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
+export const GET = route(async (req) => {
+  const user = await requireUser();
   const { searchParams } = req.nextUrl;
-  const type = searchParams.get("type") ?? "";
-  const limit = Math.min(parseInt(searchParams.get("limit") ?? "100", 10), 500);
-  const cursor = searchParams.get("cursor") ?? null;
+  const where = categoryWhere(searchParams.get("type") ?? "");
+  if (!where || searchParams.get("type") === "folder") return NextResponse.json({ nodes: [], nextCursor: null });
+  const limit = intParam(searchParams.get("limit"), 100, 1, 500);
+  let cursor = searchParams.get("cursor");
+  const acl = await getAcl(user);
 
-  let mimeTypeFilter: object = {};
-  if (type === "image") {
-    mimeTypeFilter = { startsWith: "image/" };
-  } else if (type === "video") {
-    mimeTypeFilter = { startsWith: "video/" };
-  } else if (type === "document") {
-    mimeTypeFilter = { startsWith: "application/" };
-  } else {
-    return NextResponse.json({ nodes: [], nextCursor: null });
-  }
-
-  const results = await prisma.fileNode.findMany({
-    where: {
-      isVisible: true,
-      inTrash: false,
-      mimeType: mimeTypeFilter,
-    },
-    include: { contentIdentity: { include: { thumbnail: true, preview: true } } },
-    orderBy: { updatedAt: "desc" },
-    take: limit + 1,                    // fetch one extra to determine if there's a next page
-    ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-  });
-
-  // Determine next cursor
-  const hasMore = results.length > limit;
-  const page = hasMore ? results.slice(0, limit) : results;
-  const nextCursor = hasMore ? page[page.length - 1].id : null;
-
-  // Filter by ACL for non-owners
-  if (user.role !== "OWNER") {
-    const filtered = await Promise.all(
-      page.map(async (r) => {
-        const allowed = await checkAccess(user.id, user.role, r.relativePath);
-        return allowed ? r : null;
-      })
-    );
-    const allowed = filtered.filter(Boolean) as typeof page;
-    return NextResponse.json({
-      nodes: serializeNodes(allowed),
-      nextCursor: allowed.length === limit ? nextCursor : null,
+  const out: ListedNode[] = [];
+  let exhausted = false;
+  // Keep scanning until the page is full of items this user may see, so
+  // permission filtering never ends infinite scroll early.
+  for (let rounds = 0; out.length < limit && rounds < 20; rounds++) {
+    const batch = await prisma.fileNode.findMany({
+      where: { ...where, isVisible: true, inTrash: false },
+      include: nodeInclude,
+      orderBy: [{ modifiedAt: { sort: "desc", nulls: "last" } }, { id: "desc" }],
+      take: limit,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
     });
+    for (const n of batch) {
+      if (out.length >= limit) break;
+      cursor = n.id;
+      if (acl.canAccess(n.relativePath)) out.push(n);
+    }
+    if (batch.length < limit) {
+      exhausted = true;
+      break;
+    }
   }
-
-  return NextResponse.json({ nodes: serializeNodes(page), nextCursor });
-}
+  return NextResponse.json({ nodes: await serializeListed(out), nextCursor: exhausted ? null : cursor });
+});

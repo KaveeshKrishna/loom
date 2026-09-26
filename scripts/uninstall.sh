@@ -21,9 +21,14 @@ read -r -p "Also permanently DELETE the database (all users, indexed metadata, f
 if [[ "$wipe_db" =~ ^[Yy]$ ]]; then
   read -r -p "Are you SURE? This cannot be undone. Type 'delete' to confirm: " confirm
   if [ "$confirm" = "delete" ]; then
+    echo "Taking a last database backup first (in backups/), just in case..."
+    ./scripts/backup-db.sh | tail -n1 || {
+      echo "The backup failed, so the database was NOT deleted. Nothing was changed."
+      exit 1
+    }
     echo "Removing containers and database volume..."
     $COMPOSE down --volumes
-    echo "Done. Database volume deleted."
+    echo "Done. Database volume deleted. The last backup is in backups/ (delete it yourself if you don't need it)."
     exit 0
   else
     echo "Confirmation did not match 'delete' — aborting. Nothing was changed."

@@ -1,77 +1,76 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+/**
+ * GET /api/files/properties?path=... — details for the Properties/Details panel:
+ * size (recursive for folders), dates, type, health, media metadata (EXIF,
+ * video codec/duration) and recent activity on this path.
+ */
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { checkAccess } from "@/lib/acl";
-import type { Role } from "@prisma/client";
+import { route, requireUser, forbidden, notFound, toJson } from "@/lib/http";
+import { getAcl } from "@/lib/acl";
+import { normalizeRelPath } from "@/lib/fs-guard";
+import { folderStats } from "@/lib/file-ops";
 
-export async function GET(req: NextRequest) {
-  try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export const GET = route(async (req) => {
+  const user = await requireUser();
+  const path = normalizeRelPath(req.nextUrl.searchParams.get("path"));
+  const acl = await getAcl(user);
+  if (!acl.canTraverse(path)) throw forbidden();
 
-    const pathParam = req.nextUrl.searchParams.get("path");
-    if (!pathParam) return NextResponse.json({ error: "Path is required" }, { status: 400 });
+  const node = await prisma.fileNode.findFirst({
+    where: { relativePath: path, inTrash: false },
+    include: { contentIdentity: { include: { videoCaches: true, thumbnail: true, preview: true } } },
+  });
+  if (!node) throw notFound();
 
-    const allowed = await checkAccess(session.user.id, (session.user as unknown as { role: Role }).role, pathParam);
-    if (!allowed) return NextResponse.json({ error: "Access denied" }, { status: 403 });
+  let size = node.size ?? BigInt(0);
+  let childCount: number | undefined;
+  let fileCount: number | undefined;
+  let dirCount: number | undefined;
+  if (node.type === "DIRECTORY") {
+    const stats = await folderStats(node.relativePath);
+    size = stats.size;
+    fileCount = stats.files;
+    dirCount = stats.dirs;
+    childCount = stats.files + stats.dirs;
+  }
 
-    const node = await prisma.fileNode.findFirst({
-      where: { relativePath: pathParam },
-      include: {
-        contentIdentity: {
-          include: {
-            videoCaches: true
-          }
-        }
-      }
-    });
+  const favorite = await prisma.favorite.findUnique({
+    where: { userId_fileNodeId: { userId: user.id, fileNodeId: node.id } },
+    select: { id: true },
+  });
 
-    if (!node) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Recent activity for this exact path (audit details are JSON)
+  const activity = await prisma.$queryRaw<{ action: string; timestamp: Date; userName: string | null }[]>`
+    SELECT a.action, a.timestamp, u.name AS "userName"
+    FROM "audit_logs" a LEFT JOIN "users" u ON u.id = a."userId"
+    WHERE a.details->>'path' = ${node.relativePath}
+       OR a.details->>'dest' = ${node.relativePath}
+       OR a.details->>'finalPath' = ${node.relativePath}
+    ORDER BY a.timestamp DESC LIMIT 10`;
 
-    let childCount = 0;
-    let totalSize = BigInt(0);
-
-    if (node.type === "DIRECTORY") {
-      const prefix = `${node.relativePath}/`;
-      const children = await prisma.fileNode.aggregate({
-        where: {
-          relativePath: { startsWith: prefix },
-          inTrash: false,
-          type: "FILE", // only count files for size, or both for count.
-        },
-        _count: { id: true },
-        _sum: { size: true }
-      });
-      childCount = children._count.id;
-      totalSize = children._sum.size || BigInt(0);
-
-      // Add direct subdirectories to the count
-      const dirChildren = await prisma.fileNode.count({
-        where: {
-          relativePath: { startsWith: prefix },
-          inTrash: false,
-          type: "DIRECTORY",
-        }
-      });
-      childCount += dirChildren;
-    }
-
-    return NextResponse.json({
+  const video = node.contentIdentity?.videoCaches?.[0];
+  return NextResponse.json(
+    toJson({
+      id: node.id,
+      name: node.name,
       type: node.type,
+      mimeType: node.mimeType,
       relativePath: node.relativePath,
-      size: (node.type === "DIRECTORY" ? totalSize : (node.size ?? BigInt(0))).toString(),
-      childCount: node.type === "DIRECTORY" ? childCount : undefined,
+      size: size.toString(),
+      childCount,
+      fileCount,
+      dirCount,
       modifiedAt: node.modifiedAt,
+      indexedAt: node.indexedAt,
       healthStatus: node.healthStatus,
       healthError: node.healthError,
       fastHash: node.contentIdentity?.fastHash,
-      videoDetails: node.contentIdentity?.videoCaches?.[0] ? {
-        duration: node.contentIdentity.videoCaches[0].durationSeconds ?? 0
-      } : null
-    });
-  } catch (err: unknown) {
-    console.error("Properties API Error:", err);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
-  }
-}
+      mediaInfo: node.contentIdentity?.mediaInfo ?? null,
+      browserCompatible: node.browserCompatible,
+      favorite: !!favorite,
+      canWrite: acl.canAccess(node.relativePath),
+      videoDetails: video ? { duration: video.durationSeconds ?? 0 } : null,
+      activity,
+    })
+  );
+});

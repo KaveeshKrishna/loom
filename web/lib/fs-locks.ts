@@ -1,14 +1,19 @@
 /**
  * fs-locks.ts
  *
- * Provides in-memory locking for filesystem paths to prevent concurrent mutative
- * operations (e.g. moving a file while it is being deleted).
+ * In-process locks for filesystem paths, so two operations can't touch the
+ * same tree at the same time (e.g. moving a folder while a file inside it is
+ * being trashed).
  *
- * In a multi-instance setup, this would be backed by Redis. For a single-instance
- * personal app like Loom, an in-memory Map is sufficient.
+ * Locks are hierarchical: a lock on "/media/A" conflicts with a held lock on
+ * "/media/A/x" and with one on "/media" — an operation on a folder covers
+ * everything beneath it. Loom runs a single web process, so an in-memory
+ * registry is enough; the scanner never mutates user-visible paths.
  */
 
-const activeLocks = new Set<string>();
+import path from "path";
+
+const activeLocks = new Map<string, number>();
 
 export class FsLockError extends Error {
   constructor(message: string) {
@@ -17,66 +22,47 @@ export class FsLockError extends Error {
   }
 }
 
-/**
- * Acquire an exclusive lock on a path.
- * Will wait if the lock is held, up to a timeout.
- * Returns a release function that MUST be called in a finally block.
- */
-export async function acquirePathLock(
-  absolutePath: string,
-  timeoutMs = 5000
-): Promise<() => void> {
-  const startTime = Date.now();
+function overlaps(a: string, b: string): boolean {
+  return a === b || a.startsWith(b + path.sep) || b.startsWith(a + path.sep);
+}
 
-  while (activeLocks.has(absolutePath)) {
-    if (Date.now() - startTime > timeoutMs) {
-      throw new FsLockError(`Timeout waiting for lock on: ${absolutePath}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
+function conflictsWithHeld(p: string): boolean {
+  for (const held of activeLocks.keys()) {
+    if (overlaps(p, held)) return true;
   }
-
-  activeLocks.add(absolutePath);
-
-  return () => {
-    activeLocks.delete(absolutePath);
-  };
+  return false;
 }
 
 /**
- * Check if a path is currently locked.
- */
-export function isPathLocked(absolutePath: string): boolean {
-  return activeLocks.has(absolutePath);
-}
-
-/**
- * Acquire locks for multiple paths at once (e.g. source and destination of a move).
- * Locks are sorted to prevent deadlocks.
+ * Acquire locks on several paths at once (all-or-nothing). Waits up to
+ * `timeoutMs` for conflicting locks to clear. Returns a release function
+ * that MUST be called in a finally block.
  */
 export async function acquireMultiPathLock(
   absolutePaths: string[],
-  timeoutMs = 5000
+  timeoutMs = 10_000
 ): Promise<() => void> {
-  // Sort paths to guarantee consistent lock ordering (prevents deadlocks)
-  const sorted = [...new Set(absolutePaths)].sort();
-  const releases: Array<() => void> = [];
-
-  try {
-    for (const path of sorted) {
-      const release = await acquirePathLock(path, timeoutMs);
-      releases.push(release);
+  const wanted = [...new Set(absolutePaths.map((p) => path.normalize(p)))];
+  const start = Date.now();
+  while (wanted.some(conflictsWithHeld)) {
+    if (Date.now() - start > timeoutMs) {
+      throw new FsLockError(`Timeout waiting for lock on: ${wanted.join(", ")}`);
     }
-    return () => {
-      // Release in reverse order
-      while (releases.length > 0) {
-        releases.pop()!();
-      }
-    };
-  } catch (err) {
-    // If we fail halfway through, release everything we acquired so far
-    while (releases.length > 0) {
-      releases.pop()!();
-    }
-    throw err;
+    await new Promise((r) => setTimeout(r, 25));
   }
+  for (const p of wanted) activeLocks.set(p, Date.now());
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    for (const p of wanted) activeLocks.delete(p);
+  };
+}
+
+export function acquirePathLock(absolutePath: string, timeoutMs?: number) {
+  return acquireMultiPathLock([absolutePath], timeoutMs);
+}
+
+export function isPathLocked(absolutePath: string): boolean {
+  return conflictsWithHeld(path.normalize(absolutePath));
 }

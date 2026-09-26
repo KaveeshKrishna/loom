@@ -6,9 +6,9 @@ A shareable, completely fake version of Loom. Same Next.js frontend, built with 
 
 That flag pulls in web/lib/demo/, which swaps the few server-side auth and setup checks for client-only versions (there's no database or better-auth session to check), replaces window.fetch and XMLHttpRequest so every /api/* request is answered from fake state in the browser, and registers a small Service Worker (web/public/demo-sw.js) to serve generated placeholder photos and videos for img, video, and download links, since those don't go through fetch() and the page-level patch can't see them.
 
-There is no backend. app/api/ is removed for this build, a static export can't include route handlers that use headers() or cookies(), and all of ours do. The output is static HTML, JS, and CSS, it can't read or write anything on the host serving it, and it never talks to a real database, filesystem, or auth server.
+There is no backend. app/api/ is removed for this build, a static export can't include route handlers that use headers() or cookies(), and all of ours do. The setup page and the public share-link pages (app/s/) are removed too, since they only make sense with a server. Features that need a server behave as follows in the demo: uploads go through the same chunked protocol but are kept in memory, share links show as turned off, live updates only come from changes in the same tab, and File Health's Check again does nothing because there's no scanner. The output is static HTML, JS, and CSS, it can't read or write anything on the host serving it, and it never talks to a real database, filesystem, or auth server.
 
-Changes a visitor makes, renaming a file, moving something to trash, adding a user, editing permissions, are saved in that browser's localStorage. The DEMO badge popup has a reset demo button.
+Changes a visitor makes, renaming a file, editing a text file, moving something to trash, adding a user, editing permissions, are saved in that browser's localStorage. The DEMO badge popup has a reset demo button.
 
 Login: anything works. There's a fill demo credentials button on the login page that fills in demo / demo.
 

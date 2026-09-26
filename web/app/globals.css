@@ -1,5 +1,7 @@
 @import "tailwindcss";
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
+
+/* The in-app theme toggle sets .dark on <html>; make Tailwind's dark: variant follow it. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 @layer base {
   :root {
@@ -96,7 +98,8 @@
 
   body {
     @apply bg-[hsl(var(--background))] text-[hsl(var(--foreground))];
-    font-family: "Inter", system-ui, -apple-system, sans-serif;
+    /* System fonts: no requests to third-party font servers from a self-hosted app. */
+    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     font-feature-settings: "cv11", "ss01";
   }
 
@@ -161,3 +164,59 @@
     -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
   }
 }
+
+@layer utilities {
+  /* Dialog entrance (used by components/ui/Dialog.tsx) */
+  .animate-in-pop {
+    animation: pop 0.16s ease-out;
+  }
+  /* Placeholder shimmer for tiles whose thumbnail is still being generated */
+  .processing-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .processing-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, hsl(var(--background) / 0.55), transparent);
+    animation: shimmer 1.4s infinite;
+  }
+  .focus-ring:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+}
+
+@keyframes pop {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Rendered Markdown in the text viewer */
+.markdown-body { font-size: 15px; line-height: 1.7; word-wrap: break-word; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 { font-weight: 600; line-height: 1.3; margin: 1.4em 0 0.6em; }
+.markdown-body h1 { font-size: 1.8em; border-bottom: 1px solid hsl(var(--border)); padding-bottom: 0.3em; }
+.markdown-body h2 { font-size: 1.4em; border-bottom: 1px solid hsl(var(--border)); padding-bottom: 0.3em; }
+.markdown-body h3 { font-size: 1.2em; }
+.markdown-body p, .markdown-body ul, .markdown-body ol, .markdown-body blockquote, .markdown-body pre, .markdown-body table { margin: 0 0 1em; }
+.markdown-body ul { list-style: disc; padding-left: 1.6em; }
+.markdown-body ol { list-style: decimal; padding-left: 1.6em; }
+.markdown-body li + li { margin-top: 0.25em; }
+.markdown-body a { color: hsl(var(--primary)); text-decoration: underline; }
+.markdown-body code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; background: hsl(var(--accent)); padding: 0.15em 0.35em; border-radius: 4px; }
+.markdown-body pre { background: hsl(var(--accent)); padding: 1em; border-radius: 8px; overflow-x: auto; }
+.markdown-body pre code { background: none; padding: 0; }
+.markdown-body blockquote { border-left: 3px solid hsl(var(--border)); padding-left: 1em; color: hsl(var(--muted-foreground)); }
+.markdown-body table { border-collapse: collapse; display: block; overflow-x: auto; }
+.markdown-body th, .markdown-body td { border: 1px solid hsl(var(--border)); padding: 0.4em 0.8em; }
+.markdown-body img { max-width: 100%; }
+.markdown-body hr { border: 0; border-top: 1px solid hsl(var(--border)); margin: 1.5em 0; }
+.markdown-body input[type="checkbox"] { margin-right: 0.4em; }

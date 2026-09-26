@@ -68,6 +68,8 @@ export function AclPanel() {
             userId: selectedUser,
             path: en.path.replace(/^\/+|\/+$/g, "").trim(),
             allow: en.allow === "true",
+            // Editing an existing rule replaces it (so changing its path doesn't leave the old rule behind)
+            ...(en.id ? { id: en.id } : {}),
           }),
         })
       ),

@@ -1,55 +1,40 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+/**
+ * GET    /api/audit?cursor=&limit=&action=  — audit log, newest first (Owner only)
+ * DELETE /api/audit?id=  — delete one entry; without id, clear everything
+ *
+ * Reading never deletes anything. Old entries are pruned by the scanner after
+ * LOOM_AUDIT_RETENTION_DAYS (default 180).
+ */
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { headers } from "next/headers";
+import { route, requireOwner, intParam } from "@/lib/http";
 
-const MAX_AUDIT_LOGS = 20;
-
-async function pruneOldLogs() {
-  // Keep only the latest MAX_AUDIT_LOGS, delete the rest
-  const all = await prisma.auditLog.findMany({
-    orderBy: { timestamp: "desc" },
-    select: { id: true },
-  });
-  if (all.length > MAX_AUDIT_LOGS) {
-    const toDelete = all.slice(MAX_AUDIT_LOGS).map((l) => l.id);
-    await prisma.auditLog.deleteMany({ where: { id: { in: toDelete } } });
-  }
-}
-
-export async function GET() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const user = await prisma.user.findUnique({ where: { email: session.user.email! } });
-  if (!user || user.role !== "OWNER") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-  // Auto-prune on every read
-  await pruneOldLogs();
-
+export const GET = route(async (req) => {
+  await requireOwner();
+  const sp = req.nextUrl.searchParams;
+  const limit = intParam(sp.get("limit"), 50, 1, 200);
+  const cursor = sp.get("cursor");
+  const action = sp.get("action");
   const logs = await prisma.auditLog.findMany({
+    where: action ? { action } : undefined,
     include: { user: { select: { name: true, email: true } } },
-    orderBy: { timestamp: "desc" },
-    take: MAX_AUDIT_LOGS,
+    orderBy: [{ timestamp: "desc" }, { id: "desc" }],
+    take: limit + 1,
+    ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
   });
-  return NextResponse.json({ logs });
-}
+  const hasMore = logs.length > limit;
+  const page = hasMore ? logs.slice(0, limit) : logs;
+  return NextResponse.json({ logs: page, nextCursor: hasMore ? page[page.length - 1].id : null });
+});
 
-export async function DELETE(req: NextRequest) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const user = await prisma.user.findUnique({ where: { email: session.user.email! } });
-  if (!user || user.role !== "OWNER") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-  const { searchParams } = req.nextUrl;
-  const id = searchParams.get("id");
-
+export const DELETE = route(async (req) => {
+  const owner = await requireOwner();
+  const id = req.nextUrl.searchParams.get("id");
   if (id) {
-    // Delete a single log entry
-    await prisma.auditLog.delete({ where: { id } }).catch(() => {});
-    return NextResponse.json({ success: true });
+    await prisma.auditLog.deleteMany({ where: { id } });
   } else {
-    // Clear all log entries
     await prisma.auditLog.deleteMany({});
-    return NextResponse.json({ success: true });
+    await prisma.auditLog.create({ data: { userId: owner.id, action: "AUDIT_CLEARED", details: {} } });
   }
-}
+  return NextResponse.json({ success: true });
+});

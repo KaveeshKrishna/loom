@@ -1,57 +1,34 @@
-import { NextRequest, NextResponse } from "next/server";
+/**
+ * GET /api/files?path=... — the direct children of a folder.
+ * One indexed lookup on parentPath; permissions are evaluated in memory.
+ */
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { auth } from "@/lib/auth";
-import { checkAccess } from "@/lib/acl";
-import { sanitizePath, serializeNodes } from "@/lib/utils";
-import { headers } from "next/headers";
+import { route, requireUser, forbidden, notFound } from "@/lib/http";
+import { getAcl } from "@/lib/acl";
+import { normalizeRelPath } from "@/lib/fs-guard";
+import { nodeInclude, serializeListed } from "@/lib/listing";
 
-export async function GET(req: NextRequest) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export const GET = route(async (req) => {
+  const user = await requireUser();
+  const path = normalizeRelPath(req.nextUrl.searchParams.get("path"));
+  const acl = await getAcl(user);
+  if (!acl.canTraverse(path)) throw forbidden();
+
+  if (path) {
+    const dir = await prisma.fileNode.findFirst({
+      where: { relativePath: path, inTrash: false },
+      select: { type: true },
+    });
+    if (!dir) throw notFound("Folder not found");
+    if (dir.type !== "DIRECTORY") throw notFound("Not a folder");
   }
 
-  const user = await prisma.user.findUnique({ where: { email: session.user.email! } });
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const { searchParams } = req.nextUrl;
-  const rawPath = searchParams.get("path") ?? "";
-  const path = sanitizePath(rawPath);
-
-  // ACL check: does the user have access to this path?
-  const allowed = await checkAccess(user.id, user.role, path);
-  if (!allowed) {
-    return NextResponse.json({ error: "Access denied" }, { status: 403 });
-  }
-
-  // Fetch directory contents from file index
-  const prefix = path ? `${path}/` : "";
-
-  // Get all nodes under this path (one level deep)
-  const allNodes = await prisma.fileNode.findMany({
-    where: {
-      isVisible: true,
-      inTrash: false,
-      relativePath: {
-        startsWith: prefix,
-      },
-    },
-    include: {
-      contentIdentity: { include: { thumbnail: true, preview: true } },
-    },
+  const children = await prisma.fileNode.findMany({
+    where: { parentPath: path, inTrash: false, isVisible: true },
+    include: nodeInclude,
+    take: 50_000,
   });
-
-  // Filter to only direct children (one level deep) and check ACL for each child
-  const children = [];
-  for (const node of allNodes) {
-    const rest = node.relativePath.slice(prefix.length);
-    if (!rest.includes("/")) {
-      const isAllowed = await checkAccess(user.id, user.role, node.relativePath);
-      if (isAllowed) {
-        children.push(node);
-      }
-    }
-  }
-
-  return NextResponse.json({ path, children: serializeNodes(children) });
-}
+  const visible = acl.isOwner ? children : children.filter((n) => acl.canTraverse(n.relativePath));
+  return NextResponse.json({ path, children: await serializeListed(visible), canWrite: acl.canAccess(path) });
+});

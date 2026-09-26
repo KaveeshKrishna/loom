@@ -1,15 +1,21 @@
 "use client";
 
-import { useState, useLayoutEffect, type ReactNode } from "react";
+import { useState, useLayoutEffect, useEffect, type ReactNode } from "react";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
-import { TopBarProvider, useTopBar } from "./TopBarContext";
+import { TopBarProvider, useSearch, useNav } from "./TopBarContext";
 import { ClipboardProvider } from "./ClipboardContext";
 import { UploadProvider } from "./UploadContext";
+import { LiveProvider } from "@/lib/client/live";
 import { UploadWidget } from "./UploadWidget";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { GlobalSearchResults } from "@/components/files/GlobalSearchResults";
-import { PropertiesDialog } from "@/components/files/PropertiesDialog";
+import { Toaster } from "@/components/ui/Toaster";
+import { DialogHost } from "@/components/ui/Dialog";
+import { CollisionHost } from "@/components/files/CollisionDialog";
+import { FolderPickerHost } from "@/components/files/FolderPicker";
+import { ShareHost } from "@/components/files/ShareDialog";
+import { registerPinUpdater } from "@/components/files/actions";
 import { cn } from "@/lib/utils";
 
 interface MainShellProps {
@@ -29,7 +35,14 @@ function MainShellInner({ children, userName, userEmail, isOwner }: MainShellPro
   );
   const [mounted, setMounted] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const { searchQuery, searchGlobal, setSearchQuery, setSearchGlobal } = useTopBar();
+  const { searchQuery, debouncedQuery, searchGlobal, setSearchQuery, setSearchGlobal } = useSearch();
+  const { updatePinsForMove } = useNav();
+
+  // Keep sidebar pins valid when folders are renamed, moved or deleted.
+  useEffect(() => {
+    registerPinUpdater(updatePinsForMove);
+    return () => registerPinUpdater(null);
+  }, [updatePinsForMove]);
 
   useLayoutEffect(() => {
     setMounted(true);
@@ -101,9 +114,9 @@ function MainShellInner({ children, userName, userEmail, isOwner }: MainShellPro
           )}
           id="main-content"
         >
-          {searchGlobal && searchQuery ? (
-            <GlobalSearchResults 
-              query={searchQuery} 
+          {searchGlobal && debouncedQuery && searchQuery ? (
+            <GlobalSearchResults
+              query={debouncedQuery}
               onClose={() => { setSearchQuery(""); setSearchGlobal(false); }} 
             />
           ) : (
@@ -112,20 +125,26 @@ function MainShellInner({ children, userName, userEmail, isOwner }: MainShellPro
         </main>
       </div>
 
-      <PropertiesDialog />
       <UploadWidget />
+      <Toaster />
+      <DialogHost />
+      <CollisionHost />
+      <FolderPickerHost />
+      <ShareHost />
     </div>
   );
 }
 
 export function MainShell(props: MainShellProps) {
   return (
-    <TopBarProvider userEmail={props.userEmail}>
-      <ClipboardProvider>
-        <UploadProvider>
-          <MainShellInner {...props} />
-        </UploadProvider>
-      </ClipboardProvider>
-    </TopBarProvider>
+    <LiveProvider>
+      <TopBarProvider userEmail={props.userEmail}>
+        <ClipboardProvider>
+          <UploadProvider>
+            <MainShellInner {...props} />
+          </UploadProvider>
+        </ClipboardProvider>
+      </TopBarProvider>
+    </LiveProvider>
   );
 }

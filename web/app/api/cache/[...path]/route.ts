@@ -1,40 +1,20 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { createReadStream } from "fs";
-import { stat } from "fs/promises";
-import { join } from "path";
-import mime from "mime-types";
-import { headers } from "next/headers";
-import { Readable } from "stream";
+/**
+ * GET /api/cache/<cachePath> — thumbnails and previews from /cache.
+ * Cache paths are content-addressed (content id + profile version), so they
+ * can be cached by the browser for a long time. Never publicly cacheable.
+ */
+import { route, requireUser } from "@/lib/http";
+import { getAcl } from "@/lib/acl";
+import { resolveCachePath } from "@/lib/cache-access";
+import { sendFile } from "@/lib/send-file";
 
-const CACHE_ROOT = "/cache";
-
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ path: string[] }> }
-) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
+export const GET = route<{ params: Promise<{ path: string[] }> }>(async (req, { params }) => {
+  const user = await requireUser();
+  const acl = await getAcl(user);
   const { path } = await params;
-  const relativePath = path.map(decodeURIComponent).join("/");
-
-  const absolutePath = join(CACHE_ROOT, relativePath);
-  if (!absolutePath.startsWith(CACHE_ROOT + "/")) {
-    return NextResponse.json({ error: "Invalid path" }, { status: 400 });
-  }
-
-  try {
-    await stat(absolutePath);
-    const mimeType = mime.lookup(absolutePath) || "image/webp";
-    const stream = createReadStream(absolutePath);
-    return new NextResponse(Readable.toWeb(stream) as ReadableStream, {
-      headers: {
-        "Content-Type": mimeType,
-        "Cache-Control": "public, max-age=86400, immutable",
-      },
-    });
-  } catch {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-}
+  const abs = await resolveCachePath(path, acl);
+  return sendFile(req, abs, {
+    filename: path[path.length - 1],
+    cacheControl: "private, max-age=604800",
+  });
+});

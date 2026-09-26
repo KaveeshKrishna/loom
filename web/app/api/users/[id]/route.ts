@@ -1,70 +1,82 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+/**
+ * PATCH  /api/users/:id { name?, password?, role? } — Owner only
+ * DELETE /api/users/:id                             — Owner only
+ *
+ * Guards: the last Owner can't be demoted or deleted, and changing a
+ * password signs that user out everywhere.
+ */
+import { NextResponse } from "next/server";
 import { hashPassword } from "better-auth/crypto";
-import { headers } from "next/headers";
+import { prisma } from "@/lib/prisma";
+import { route, requireOwner, readJson, badRequest, notFound } from "@/lib/http";
 
-async function requireOwner() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session?.user) return null;
-  const user = await prisma.user.findUnique({ where: { email: session.user.email! } });
-  if (!user || user.role !== "OWNER") return null;
-  return user;
-}
+type Ctx = { params: Promise<{ id: string }> };
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const PATCH = route<Ctx>(async (req, { params }) => {
   const owner = await requireOwner();
-  if (!owner) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
-  const { name, password, role } = await req.json();
+  const { name, password, role } = await readJson<{ name?: unknown; password?: unknown; role?: unknown }>(req);
 
-  const userUpdate: Record<string, string> = {};
-  if (name) userUpdate.name = name;
-  if (role) userUpdate.role = role;
+  const target = await prisma.user.findUnique({ where: { id } });
+  if (!target) throw notFound("User not found");
 
+  const data: { name?: string; role?: "OWNER" | "FAMILY"; password?: string } = {};
+  if (name !== undefined) {
+    if (typeof name !== "string" || !name.trim() || name.length > 100) throw badRequest("Invalid name");
+    data.name = name.trim();
+  }
+  if (role !== undefined) {
+    if (role !== "OWNER" && role !== "FAMILY") throw badRequest("Role must be OWNER or FAMILY");
+    if (target.role === "OWNER" && role === "FAMILY") {
+      const owners = await prisma.user.count({ where: { role: "OWNER" } });
+      if (owners <= 1) throw badRequest("There must always be at least one Owner");
+    }
+    data.role = role;
+  }
   let newHash: string | undefined;
-  if (password) {
-    // Use Better Auth's hashPassword so the credential account stays valid for sign-in
+  if (password !== undefined && password !== "") {
+    if (typeof password !== "string" || password.length < 8) throw badRequest("Password must be at least 8 characters");
     newHash = await hashPassword(password);
-    userUpdate.password = newHash;
+    data.password = newHash;
   }
 
-  const user = await prisma.user.update({
-    where: { id },
-    data: userUpdate,
-    select: { id: true, name: true, email: true, role: true },
-  });
-
-  // Keep the Better Auth credential account password in sync
-  if (newHash) {
-    await prisma.account.updateMany({
-      where: { userId: id, providerId: "credential" },
-      data: { password: newHash },
+  const user = await prisma.$transaction(async (tx) => {
+    const u = await tx.user.update({ where: { id }, data, select: { id: true, name: true, email: true, role: true } });
+    if (newHash) {
+      await tx.account.updateMany({ where: { userId: id, providerId: "credential" }, data: { password: newHash } });
+      // Sign the user out everywhere (except the Owner's own current session
+      // when they change their own password — they stay signed in here).
+      if (id !== owner.id) await tx.session.deleteMany({ where: { userId: id } });
+    }
+    await tx.auditLog.create({
+      data: {
+        userId: owner.id,
+        action: "USER_UPDATED",
+        details: { targetId: id, targetEmail: target.email, changed: Object.keys(data) },
+      },
     });
-  }
-
-  await prisma.auditLog.create({
-    data: { userId: owner.id, action: "USER_UPDATED", details: { targetId: id } },
+    return u;
   });
   return NextResponse.json({ user });
-}
+});
 
-export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const DELETE = route<Ctx>(async (_req, { params }) => {
   const owner = await requireOwner();
-  if (!owner) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { id } = await params;
-  if (id === owner.id) return NextResponse.json({ error: "Cannot delete your own account" }, { status: 400 });
-
-  // AclRule has onDelete: Cascade in the Prisma schema so ACL rules are
-  // automatically removed. We delete sessions and accounts manually first to
-  // avoid any FK ordering issues across providers.
-  await prisma.session.deleteMany({ where: { userId: id } });
-  await prisma.account.deleteMany({ where: { userId: id } });
-  await prisma.aclRule.deleteMany({ where: { userId: id } });
-  await prisma.user.delete({ where: { id } });
-
-  await prisma.auditLog.create({
-    data: { userId: owner.id, action: "USER_DELETED", details: { targetId: id } },
-  });
+  if (id === owner.id) throw badRequest("You can't delete your own account");
+  const target = await prisma.user.findUnique({ where: { id } });
+  if (!target) throw notFound("User not found");
+  if (target.role === "OWNER") {
+    const owners = await prisma.user.count({ where: { role: "OWNER" } });
+    if (owners <= 1) throw badRequest("There must always be at least one Owner");
+  }
+  // Sessions, accounts, ACL rules, favorites, uploads and notifications
+  // cascade; trash items they deleted stay (deletedByUserId -> null).
+  await prisma.$transaction([
+    prisma.user.delete({ where: { id } }),
+    prisma.auditLog.create({
+      data: { userId: owner.id, action: "USER_DELETED", details: { targetId: id, targetEmail: target.email } },
+    }),
+  ]);
   return NextResponse.json({ success: true });
-}
+});
