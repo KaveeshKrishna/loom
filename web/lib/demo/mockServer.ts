@@ -225,6 +225,27 @@ function route(method: string, path: string, ctx: Ctx): unknown {
     };
   }
 
+  if (p === "/files/health" && M("GET")) {
+    const statusFilter = ctx.search.get("status");
+    const all = s.nodes.filter((n) => !n.inTrash && (n.healthStatus === "CORRUPT" || n.healthStatus === "UNSUPPORTED"));
+    const filtered = statusFilter ? all.filter((n) => n.healthStatus === statusFilter) : all;
+    const corrupt = all.filter((n) => n.healthStatus === "CORRUPT").length;
+    const unsupported = all.filter((n) => n.healthStatus === "UNSUPPORTED").length;
+    return {
+      nodes: filtered.map((n) => ({
+        id: n.id, name: n.name, relativePath: n.relativePath, type: n.type, mimeType: n.mimeType,
+        size: n.size, modifiedAt: n.modifiedAt, healthStatus: n.healthStatus, healthError: n.healthError,
+        sourceVersion: n.sourceVersion,
+      })),
+      summary: { total: all.length, corrupt, unsupported },
+    };
+  }
+  if (p === "/files/health" && M("POST")) {
+    // The demo has no scanner, so "checking again" can't change anything.
+    const ids = ((ctx.body as { fileNodeIds?: string[] })?.fileNodeIds ?? []).filter((id) => s.nodes.some((n) => n.id === id));
+    return { queued: ids.length };
+  }
+
   if (seg[0] === "files" && seg[1] === "hls" && seg.length === 3 && M("GET")) {
     // Probe — always report native-compatible so MediaViewer plays the
     // Service Worker-served bundled clip directly; real HLS is never

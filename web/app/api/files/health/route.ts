@@ -1,10 +1,14 @@
 /**
- * GET /api/files/health?status=CORRUPT|UNSUPPORTED — files the scanner could
- * not process. Owner only.
+ * GET  /api/files/health?status=CORRUPT|UNSUPPORTED — files the scanner could
+ *      not process. Owner only.
+ * POST /api/files/health {fileNodeIds} — check those files again: reset their
+ *      health and queue them for processing (e.g. after replacing a broken
+ *      file or updating Loom). Owner only.
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { route, requireOwner } from "@/lib/http";
+import { route, requireOwner, readJson, badRequest } from "@/lib/http";
+import { queueProcessFile, notifyScanner } from "@/lib/jobs";
 
 export const GET = route(async (req) => {
   await requireOwner();
@@ -35,4 +39,28 @@ export const GET = route(async (req) => {
     nodes: nodes.map((n) => ({ ...n, size: n.size?.toString() ?? null })),
     summary: { total: count("CORRUPT") + count("UNSUPPORTED"), corrupt: count("CORRUPT"), unsupported: count("UNSUPPORTED") },
   });
+});
+
+export const POST = route(async (req) => {
+  const owner = await requireOwner();
+  const { fileNodeIds } = await readJson<{ fileNodeIds?: unknown }>(req);
+  if (!Array.isArray(fileNodeIds) || fileNodeIds.length === 0 || fileNodeIds.length > 5000 || !fileNodeIds.every((id) => typeof id === "string")) {
+    throw badRequest("fileNodeIds must be a non-empty list of ids");
+  }
+  const nodes = await prisma.fileNode.findMany({
+    where: { id: { in: fileNodeIds as string[] }, type: "FILE", inTrash: false },
+    select: { id: true, name: true, relativePath: true, sourceVersion: true },
+  });
+  let queued = 0;
+  await prisma.$transaction(async (tx) => {
+    for (const n of nodes) {
+      // Only files the scanner can process get re-checked; others (e.g. an
+      // unsupported format) keep their status rather than looking fixed.
+      if (!(await queueProcessFile(n, owner.id, tx))) continue;
+      await tx.fileNode.update({ where: { id: n.id }, data: { healthStatus: "HEALTHY", healthError: null } });
+      queued++;
+    }
+  }, { timeout: 60_000 });
+  await notifyScanner();
+  return NextResponse.json({ queued });
 });

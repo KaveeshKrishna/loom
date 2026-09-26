@@ -61,6 +61,11 @@ web/next-env.d.ts
 # Local runtime data created by the installer / a local deployment
 /data/
 /backups/
+# Update state written by scripts/update.sh (for --rollback)
+/.loom/
+# Your own Docker Compose tweaks (see docs/UPGRADING.md, "Local changes")
+/compose.override.yml
+/docker-compose.override.yml
 
 # Deployment-specific infrastructure notes (contains real hostnames, IPs,
 # tunnel IDs, etc. for whichever machine this is deployed on — never shared)

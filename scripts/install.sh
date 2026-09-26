@@ -26,10 +26,8 @@ for arg in "$@"; do
   esac
 done
 
-bold() { printf '\033[1m%s\033[0m\n' "$1"; }
-info() { printf '  %s\n' "$1"; }
-warn() { printf '  \033[33m! %s\033[0m\n' "$1"; }
-fail() { printf '\033[31mError:\033[0m %s\n' "$1" >&2; exit 1; }
+# shellcheck source=lib.sh
+. scripts/lib.sh
 
 bold "Loom installer"
 echo
@@ -47,6 +45,7 @@ elif command -v docker-compose >/dev/null 2>&1; then
 else
   fail "Docker Compose is not installed (need 'docker compose' or 'docker-compose')."
 fi
+docker info >/dev/null 2>&1 || fail "Docker is installed but not reachable. Is the daemon running, and is your user allowed to use it? (try: sudo $0)"
 info "Docker + Compose found ($COMPOSE)"
 
 command -v openssl >/dev/null 2>&1 || fail "openssl is required to generate secrets."
@@ -71,11 +70,49 @@ prompt() {
   printf -v "$var" '%s' "${answer:-$default}"
 }
 
+# With an existing .env, use its settings instead of asking.
+if [ -f .env ]; then
+  for v in LOOM_MEDIA_PATH LOOM_CACHE_PATH LOOM_BIND LOOM_PORT BETTER_AUTH_URL; do
+    val="$(env_get "$v")"
+    if [ -n "$val" ]; then printf -v "$v" '%s' "$val"; fi
+  done
+  info "Using the settings in your existing .env."
+fi
+
 prompt LOOM_MEDIA_PATH "Path to your media/files directory" "./data/media"
 prompt LOOM_CACHE_PATH "Path for thumbnail/preview/video cache" "./data/cache"
 prompt LOOM_BIND "Bind address (127.0.0.1 = local only, behind a reverse proxy)" "127.0.0.1"
 prompt LOOM_PORT "Port to expose Loom on" "8085"
 prompt BETTER_AUTH_URL "Public URL you'll access Loom at (e.g. https://loom.example.com)" "http://localhost:${LOOM_PORT}"
+
+# Resolve a path the way it'll be used (relative paths are relative to the
+# repo root, where compose.yml lives) without requiring it to exist.
+abspath() {
+  case "$1" in
+    /*) realpath -m -- "$1" ;;
+    *) realpath -m -- "$PWD/$1" ;;
+  esac
+}
+MEDIA_ABS="$(abspath "$LOOM_MEDIA_PATH")"
+CACHE_ABS="$(abspath "$LOOM_CACHE_PATH")"
+case "$CACHE_ABS/" in
+  "$MEDIA_ABS"/*) fail "The cache path ($CACHE_ABS) must not be the media folder or inside it. Loom writes and deletes cache files freely; keep them apart." ;;
+esac
+case "$MEDIA_ABS/" in
+  "$CACHE_ABS"/*) fail "The media path ($MEDIA_ABS) must not be inside the cache folder." ;;
+esac
+
+# A typo in the media path would silently give Loom an empty folder.
+if [ ! -d "$LOOM_MEDIA_PATH" ]; then
+  if [ "$LOOM_MEDIA_PATH" = "./data/media" ]; then
+    : # the default; created below
+  elif [ "$NON_INTERACTIVE" = "1" ]; then
+    fail "Media path $LOOM_MEDIA_PATH doesn't exist. Create it first (or fix the path)."
+  else
+    warn "Media path $LOOM_MEDIA_PATH doesn't exist."
+    confirm "Create it as a new, empty folder?" || fail "Cancelled. Check the path and run the installer again."
+  fi
+fi
 
 info "Media path:  $LOOM_MEDIA_PATH"
 info "Cache path:  $LOOM_CACHE_PATH"
@@ -88,6 +125,14 @@ bold "3/6  Writing .env"
 
 if [ -f .env ]; then
   info ".env already exists — leaving it untouched."
+  existing_secret="$(env_get BETTER_AUTH_SECRET)"
+  existing_pg="$(env_get POSTGRES_PASSWORD)"
+  if [ -z "$existing_secret" ] || [ "$existing_secret" = "generate_a_long_random_secret_here" ]; then
+    fail "BETTER_AUTH_SECRET in your existing .env is empty or the example value. Set it to the output of 'openssl rand -base64 48' and run this again."
+  fi
+  if [ -z "$existing_pg" ] || [ "$existing_pg" = "change_this_strong_password" ]; then
+    fail "POSTGRES_PASSWORD in your existing .env is empty or the example value. Set it to the output of 'openssl rand -hex 24' and run this again (before the database is first created)."
+  fi
 else
   POSTGRES_PASSWORD="$(openssl rand -hex 24)"
   BETTER_AUTH_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
@@ -112,12 +157,20 @@ echo
 # ── 4. Storage directories ───────────────────────────────────────────────────
 bold "4/6  Preparing storage directories"
 
+NEW_MEDIA=0
+[ -d "$LOOM_MEDIA_PATH" ] || NEW_MEDIA=1
 mkdir -p "$LOOM_MEDIA_PATH" "$LOOM_CACHE_PATH"
-# The app containers run as uid:gid 1000:1000 (the "node" user). If these
-# directories were just created, make sure that user can write to them.
-if command -v chown >/dev/null 2>&1; then
-  chown -R 1000:1000 "$LOOM_CACHE_PATH" 2>/dev/null || \
-    warn "Could not chown $LOOM_CACHE_PATH to uid 1000 (may need sudo). If uploads/thumbnails fail, run: sudo chown -R 1000:1000 '$LOOM_CACHE_PATH'"
+# The app containers run as uid:gid 1000:1000 (the "node" user).
+# The cache is Loom's own, so it's safe to hand it to that user. The media
+# folder holds your files: it's never chowned, except a folder this installer
+# just created empty.
+chown -R 1000:1000 "$LOOM_CACHE_PATH" 2>/dev/null || \
+  warn "Could not chown $LOOM_CACHE_PATH to uid 1000 (may need sudo). If thumbnails fail, run: sudo chown -R 1000:1000 '$LOOM_CACHE_PATH'"
+if [ "$NEW_MEDIA" = "1" ]; then
+  chown 1000:1000 "$LOOM_MEDIA_PATH" 2>/dev/null || true
+elif [ "$(stat -c %u "$LOOM_MEDIA_PATH" 2>/dev/null)" != "1000" ]; then
+  warn "The media folder isn't owned by uid 1000. Loom can show what uid 1000 can read, but uploads,"
+  warn "renames and edits need write access for it. See docs/INSTALLATION.md (\"Permissions\")."
 fi
 info "Media:  $(cd "$LOOM_MEDIA_PATH" && pwd)"
 info "Cache:  $(cd "$LOOM_CACHE_PATH" && pwd)"
@@ -134,7 +187,7 @@ echo
 bold "6/6  Waiting for Loom to become ready"
 
 READY=0
-for i in $(seq 1 60); do
+for _ in $(seq 1 90); do
   if curl -fsS "http://127.0.0.1:${LOOM_PORT}/api/health" >/dev/null 2>&1; then
     READY=1
     break
@@ -143,7 +196,7 @@ for i in $(seq 1 60); do
 done
 
 if [ "$READY" != "1" ]; then
-  warn "Loom did not report healthy within 2 minutes."
+  warn "Loom did not report healthy within 3 minutes."
   warn "Check logs with: $COMPOSE logs -f loom-web"
   exit 1
 fi
@@ -159,5 +212,10 @@ info "Useful commands:"
 info "  $COMPOSE ps"
 info "  $COMPOSE logs -f loom-web"
 info "  $COMPOSE logs -f loom-scanner"
-info "  ./scripts/update.sh        # pull/rebuild and restart"
+info "  ./scripts/update.sh        # update safely (backs up, shows changes, verifies)"
+info "  ./scripts/update.sh --check  # is there a new version?"
 info "  ./scripts/backup-db.sh     # back up the database"
+echo
+info "Your files stay where they are: Loom never moves or deletes anything in"
+info "the media folder except when you do it from the app (and deleted items go"
+info "to Trash first). Back up that folder like any other important data."

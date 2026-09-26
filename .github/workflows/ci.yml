@@ -5,6 +5,7 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
+  workflow_dispatch:
 
 jobs:
   schema-sync:
@@ -13,6 +14,44 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: ./scripts/sync-schema.sh
+
+  shellcheck:
+    name: Shell scripts (shellcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cd scripts && shellcheck -x *.sh ../scanner/docker-entrypoint.sh ../web/docker-entrypoint.sh
+
+  migrations:
+    name: Database migrations apply cleanly
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: loom
+          POSTGRES_USER: loom
+          POSTGRES_PASSWORD: loom
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U loom -d loom" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://loom:loom@localhost:5432/loom
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: npm ci --legacy-peer-deps
+      - name: Apply all migrations to an empty database
+        working-directory: web
+        run: npx prisma migrate deploy
+      - name: Schema matches the migrations
+        working-directory: web
+        run: npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --exit-code
 
   web:
     name: web — lint, typecheck, build
@@ -33,6 +72,9 @@ jobs:
       - name: Lint
         working-directory: web
         run: npm run lint
+      - name: Typecheck
+        working-directory: web
+        run: npx tsc --noEmit
       - name: Build
         working-directory: web
         run: npm run build
@@ -57,10 +99,35 @@ jobs:
         working-directory: scanner
         run: npx tsc --noEmit
 
-  docker-build:
-    name: Docker images build
+  docker:
+    name: Docker images build and start
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build web + scanner images
-        run: docker compose build loom-web loom-scanner
+        with:
+          fetch-depth: 0
+      - name: Storage folders owned by the container user
+        run: sudo mkdir -p data/media data/cache && sudo chown -R 1000:1000 data
+      - name: Install with the real installer (non-interactive)
+        run: ./scripts/install.sh --non-interactive
+      - name: Scanner runs as the unprivileged user
+        run: |
+          users="$(docker compose exec -T loom-scanner sh -c "ps -o user,args | grep '[s]rc/index.ts' | awk '{print \$1}' | sort -u")"
+          echo "scanner processes run as: $users"
+          test "$users" = "node"
+      - name: Health endpoint reports the version
+        run: curl -fsS http://127.0.0.1:8085/api/health | grep -q "\"version\":\"$(cat VERSION)\""
+      - name: Backup and verify
+        run: ./scripts/backup-db.sh
+      - name: Update script (check, then rebuild path)
+        run: |
+          git init --bare -q /tmp/upstream.git
+          git push -q /tmp/upstream.git HEAD:refs/heads/main
+          git remote add upstream /tmp/upstream.git
+          git fetch -q upstream
+          git checkout -q -B ci-main upstream/main
+          ./scripts/update.sh --check
+          ./scripts/update.sh --yes --rebuild
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail=200

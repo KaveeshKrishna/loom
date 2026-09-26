@@ -8,9 +8,9 @@ Try the [live demo](https://loomdemo.kaveeshkrishna.in). It's a fake version wit
 
 ## What it does
 
-- **Browse** your files in a grid or a list that stays fast with tens of thousands of files in a folder. Sort by name, date, size or type, filter by kind (photos, videos, audio, documents, folders), and open a details panel with EXIF (camera, date taken, location), video codec and resolution, and recent activity.
-- **Upload anything, any size.** Drag files or whole folders onto the page, or use the New button. Big videos are sent in verified chunks, so they work behind Cloudflare and other proxies, resume after a dropped connection or a closed tab, and never fill the server's memory. An upload counts as done the moment its last byte is safely stored. Thumbnails and previews appear a few seconds later, on their own.
-- **Manage files like a desktop app:**
+- Browse your files in a grid or a list that stays fast with tens of thousands of files in a folder. Sort by name, date, size or type, filter by kind (photos, videos, audio, documents, folders), and open a details panel with EXIF (camera, date taken, location), video codec and resolution, and recent activity.
+- Upload anything, any size. Drag files or whole folders onto the page, or use the New button. Big videos are sent in verified chunks, so they work behind Cloudflare and other proxies, resume after a dropped connection or a closed tab, and never fill the server's memory. An upload counts as done the moment its last byte is safely stored. Thumbnails and previews appear a few seconds later, on their own.
+- Manage files like a desktop app:
   - Rename inline (F2), make folders and text files.
   - Cut, copy and paste, or Move to… and Copy to… with a folder picker.
   - Drag onto folders, breadcrumbs or the sidebar to move things.
@@ -18,21 +18,21 @@ Try the [live demo](https://loomdemo.kaveeshkrishna.in). It's a fake version wit
   - Keyboard shortcuts throughout.
   - Undo for moves, renames and deletes.
   - If a name is already taken, Loom asks: keep both, replace or skip. Replace never destroys anything, because the old item goes to Trash.
-- **Download** single files directly, or any selection of files and folders as one ZIP, streamed on the fly with no size limit.
-- **Share links.** Send anyone a link to a file or folder, no account needed. Links can have an expiry, a password, and a view-only mode, and you can revoke them at any time. Sharing is off until the Owner turns it on.
-- **View and edit:**
+- Download single files directly, or any selection of files and folders as one ZIP, streamed on the fly with no size limit.
+- Share links. Send anyone a link to a file or folder, no account needed. Links can have an expiry, a password, and a view-only mode, and you can revoke them at any time. Sharing is off until the Owner turns it on.
+- View and edit:
   - Full screen viewer with a filmstrip: photos with zoom, pan and slideshow; videos; audio with auto-advance; PDFs.
   - Text, code and Markdown with syntax highlighting.
   - Edit text files right in the browser. Saving is conflict-safe, and the previous version is kept in Trash.
-- **Video streaming.** Videos the browser can play are streamed as-is. Everything else (HEVC, 10-bit, MOV, MKV, AVI, AC3 audio…) is converted while you watch, only the part you're watching. You can seek anywhere instantly.
-- **Live updates.** Folders refresh by themselves when uploads finish, thumbnails are ready, or someone else changes something.
-- **Deduplication.** If the same file exists in more than one place, Loom only makes one thumbnail, preview and video cache for it.
-- **Trash.** Deleted files go to Trash for 15 days. You can restore to the original place or somewhere else, and conflicts are handled instead of overwritten.
-- **Health checks.** Broken or unsupported files are flagged on their own page, so you don't confuse them with missing ones.
-- **More than one user.** There's an Owner role and a Family role, and Family users can be limited to certain folders. Nobody can sign up on their own.
-- **Audit log.** Every change is logged.
-- **Storage.** See how full your drive is and what your library is made of.
-- **Leaves your drive alone.** Loom doesn't watch the disk and doesn't scan on startup, so drives can spin down and stay down until you ask for a rescan.
+- Video streaming. Videos the browser can play are streamed as-is. Everything else (HEVC, 10-bit, MOV, MKV, AVI, AC3 audio…) is converted while you watch, only the part you're watching. You can seek anywhere instantly.
+- Live updates. Folders refresh by themselves when uploads finish, thumbnails are ready, or someone else changes something.
+- Deduplication. If the same file exists in more than one place, Loom only makes one thumbnail, preview and video cache for it.
+- Trash. Deleted files go to Trash for 15 days. You can restore to the original place or somewhere else, and conflicts are handled instead of overwritten.
+- Health checks. Broken or unsupported files are flagged on their own page, so you don't confuse them with missing ones.
+- More than one user. There's an Owner role and a Family role, and Family users can be limited to certain folders. Nobody can sign up on their own.
+- Audit log. Every change is logged.
+- Storage. See how full your drive is and what your library is made of.
+- Leaves your drive alone. Loom doesn't watch the disk and doesn't scan on startup, so drives can spin down and stay down until you ask for a rescan.
 
 ## What you need
 
@@ -60,12 +60,19 @@ Everything lives in one .env file in the repo root, which the installer makes fr
 docker compose ps                       # what's running
 docker compose logs -f loom-web         # web app logs
 docker compose logs -f loom-scanner     # scanner logs
-./scripts/update.sh                     # pull, rebuild, migrate, restart
 ./scripts/backup-db.sh                  # back up the database
 ./scripts/uninstall.sh                  # stop and remove the containers
 ```
 
 Files you upload through Loom are indexed and processed automatically. Files you add or change outside Loom (straight on the drive, over SMB, etc.) show up after a rescan. Rescans are manual on purpose: as the Owner, go to Settings, then Scanner, then Scan Now. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains why.
+
+## Updating
+
+```bash
+./scripts/update.sh
+```
+
+It shows what's new and asks first. Then it backs up the database (and checks the backup), downloads the new version, builds it while the old one keeps running, restarts, and waits until everything is healthy. If anything goes wrong, `./scripts/update.sh --rollback` takes you back. Your media folder is never touched by installing, updating or uninstalling. `./scripts/update.sh --check` just tells you whether there's a new version. Details, and notes for specific versions, are in [docs/UPGRADING.md](docs/UPGRADING.md) and [CHANGELOG.md](CHANGELOG.md).
 
 ## Docs
 

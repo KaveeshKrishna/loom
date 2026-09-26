@@ -34,7 +34,7 @@ npm install --legacy-peer-deps
 DATABASE_URL=postgresql://loom:<password from .env>@localhost:5432/loom npm run dev
 ```
 
-For that you need Postgres's port exposed in compose.yml, or run postgres on its own.
+For that, expose Postgres's port in a compose.override.yml (git ignores it, so it never conflicts with updates), or run postgres on its own.
 
 ## Schema changes
 
@@ -53,14 +53,16 @@ Keep migrations additive: new columns need a default or a backfill, and never dr
 
 A few things that aren't obvious from any one file, worth keeping in mind before touching filesystem or API code.
 
-- **API routes.** Wrap handlers in `route()` from web/lib/http.ts and get the caller with `requireUser()` / `requireOwner()`. Throw `HttpError` (or `badRequest`, `forbidden`, …) for expected failures; everything else becomes a generic 500 without leaking internals.
-- **Paths.** Never `path.join()` request data yourself. Use `normalizeRelPath()`, `validateName()` and `resolveMediaPath()` from web/lib/fs-guard.ts. An empty string is a valid path, the media root, so check it with `== null`, not `!destDir`.
-- **Permissions.** Load an evaluator once per request with `getAcl(user)` (web/lib/acl.ts). Use `canTraverse` for listing, `canAccess` for reading or changing an item, and `canAccessTree` before operating on a folder.
-- **Changing files.** Go through web/lib/file-ops.ts. Don't write new ad-hoc fs.rename/fs.rm code in routes; the helpers handle locking, trash-instead-of-overwrite, rollback, and one-statement descendant updates.
-- **JSON.** FileNode and ContentIdentity have BigInt fields. Serialize with `serializeListed()` (web/lib/listing.ts) or `toJson()` (web/lib/http.ts).
-- **Queries.** Every query for files a user can see needs `inTrash: false`. A folder listing is `parentPath = <folder>`, and new rows must set `parentPath`.
-- **Background work.** Queue it with `queueProcessFile()` + `notifyScanner()` (web/lib/jobs.ts), and announce index changes with `publishChange()` (web/lib/events.ts) so open tabs update.
-- **Demo.** The public demo (loom-demo/) has no server. Every new JSON API route needs a handler in web/lib/demo/mockServer.ts. Anything loaded by `<img>`, `<video>` or `<a href>` needs web/public/demo-sw.js instead.
+- API routes. Wrap handlers in `route()` from web/lib/http.ts and get the caller with `requireUser()` / `requireOwner()`. Throw `HttpError` (or `badRequest`, `forbidden`, …) for expected failures; everything else becomes a generic 500 without leaking internals.
+- Paths. Never `path.join()` request data yourself. Use `normalizeRelPath()`, `validateName()` and `resolveMediaPath()` from web/lib/fs-guard.ts. An empty string is a valid path, the media root, so check it with `== null`, not `!destDir`.
+- Permissions. Load an evaluator once per request with `getAcl(user)` (web/lib/acl.ts). Use `canTraverse` for listing, `canAccess` for reading or changing an item, and `canAccessTree` before operating on a folder.
+- Changing files. Go through web/lib/file-ops.ts. Don't write new ad-hoc fs.rename/fs.rm code in routes; the helpers handle locking, trash-instead-of-overwrite, rollback, and one-statement descendant updates.
+- JSON. FileNode and ContentIdentity have BigInt fields. Serialize with `serializeListed()` (web/lib/listing.ts) or `toJson()` (web/lib/http.ts).
+- Queries. Every query for files a user can see needs `inTrash: false`. A folder listing is `parentPath = <folder>`, and new rows must set `parentPath`.
+- Background work. Queue it with `queueProcessFile()` + `notifyScanner()` (web/lib/jobs.ts), and announce index changes with `publishChange()` (web/lib/events.ts) so open tabs update.
+- Scripts. Shell scripts in scripts/ share helpers from scripts/lib.sh and must pass `shellcheck -x` (CI runs it). They must never write to, move, delete or chown anything under LOOM_MEDIA_PATH.
+- Releases. Bump VERSION and the version in web/package.json and scanner/package.json, and add a section to CHANGELOG.md, including anything people must do by hand. update.sh shows the version and change list before updating.
+- Demo. The public demo (loom-demo/) has no server. Every new JSON API route needs a handler in web/lib/demo/mockServer.ts. Anything loaded by `<img>`, `<video>` or `<a href>` needs web/public/demo-sw.js instead.
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) covers the reasoning behind these: idle-drive scanning, dedup by content, trash behavior.
 

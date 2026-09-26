@@ -137,7 +137,16 @@ async function listenForWakeups() {
 
 async function main() {
   log("INFO", `Loom scanner starting (processing concurrency: ${CONCURRENCY})`);
-  for (const d of [THUMB_DIR, PREVIEW_DIR, VIDEO_CACHE_DIR, TEMP_DIR]) await mkdir(d, { recursive: true });
+  try {
+    for (const d of [THUMB_DIR, PREVIEW_DIR, VIDEO_CACHE_DIR, TEMP_DIR]) await mkdir(d, { recursive: true });
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EACCES" || code === "EPERM") {
+      log("ERROR", "Can't write to the cache folder. It must be writable by uid 1000. On the host run: sudo chown -R 1000:1000 <your LOOM_CACHE_PATH>", { error: String(err) });
+      process.exit(1);
+    }
+    throw err;
+  }
 
   // Jobs left RUNNING by a crash or restart go back to the queue.
   const recovered = await prisma.scanJob.updateMany({ where: { status: "RUNNING" }, data: { status: "PENDING" } });

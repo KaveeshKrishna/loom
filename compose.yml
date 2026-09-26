@@ -3,6 +3,12 @@ services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    stop_grace_period: 30s
+    logging: &default-logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       POSTGRES_DB: loom
       POSTGRES_USER: loom
@@ -21,6 +27,8 @@ services:
       context: ./web
       dockerfile: Dockerfile
     restart: unless-stopped
+    stop_grace_period: 20s
+    logging: *default-logging
     ports:
       - "${LOOM_BIND:-127.0.0.1}:${LOOM_PORT:-8085}:3000"
     env_file:
@@ -38,7 +46,9 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      # Migrations run before the server starts; on a big library the first
+      # start after an update can take a while.
+      start_period: 120s
 
   # ── Scanner ─────────────────────────────────────────────────────────────────
   loom-scanner:
@@ -46,6 +56,8 @@ services:
       context: ./scanner
       dockerfile: Dockerfile
     restart: unless-stopped
+    stop_grace_period: 20s
+    logging: *default-logging
     env_file:
       - .env
     environment:

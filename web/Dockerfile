@@ -53,6 +53,9 @@ RUN mkdir -p /opt/prisma-cli && \
     npm install prisma@6.11.1 --no-save --no-audit --no-fund --no-update-notifier && \
     chown -R node:node /opt/prisma-cli
 
+# Admin helpers, e.g. scripts/reset-password.mjs (see docs/TROUBLESHOOTING.md)
+COPY --from=builder /app/scripts ./scripts
+
 COPY --chown=node:node docker-entrypoint.sh ./docker-entrypoint.sh
 
 USER node

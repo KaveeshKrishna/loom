@@ -7,12 +7,17 @@ const isBuild = process.env.NEXT_PHASE === "phase-production-build";
 
 function authSecret(): string {
   const secret = process.env.BETTER_AUTH_SECRET;
-  if (secret && secret !== "generate_a_long_random_secret_here" && secret.length >= 32) return secret;
+  if (secret && secret !== "generate_a_long_random_secret_here") {
+    if (secret.length < 32 && isProduction && !isBuild) {
+      console.warn("[auth] BETTER_AUTH_SECRET is shorter than 32 characters. Consider a longer one (openssl rand -base64 48); changing it signs everyone out.");
+    }
+    return secret;
+  }
   if (isProduction && !isBuild) {
     // Refuse to run with a missing or placeholder secret: anyone who knows it
     // could forge session cookies.
     throw new Error(
-      "BETTER_AUTH_SECRET is missing, too short, or still the example value. " +
+      "BETTER_AUTH_SECRET is missing or still the example value. " +
         "Set it in .env (./scripts/install.sh generates one) and restart."
     );
   }
