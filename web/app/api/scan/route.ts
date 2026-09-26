@@ -1,91 +1,73 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+/**
+ * Owner-only scanner controls.
+ * POST   /api/scan         — queue a full rescan (reuses one already queued/running)
+ * GET    /api/scan         — recent rescans, background-queue stats, scanner status
+ * DELETE /api/scan?id=     — cancel a queued/running job, or delete a finished one;
+ *                            without id, clear finished rescans from the list
+ */
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { headers } from "next/headers";
+import { route, requireOwner, notFound } from "@/lib/http";
+import { notifyScanner } from "@/lib/jobs";
 
-export async function POST() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const user = await prisma.user.findUnique({ where: { email: session.user.email! } });
-  if (!user || user.role !== "OWNER") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  // Only FULL_RESCAN is Owner-triggerable. INDEX_FILE is created by the
-  // upload pipeline after a successful atomic file move to /media.
+export const POST = route(async () => {
+  const owner = await requireOwner();
+  const existing = await prisma.scanJob.findFirst({
+    where: { type: "FULL_RESCAN", status: { in: ["PENDING", "RUNNING"] } },
+  });
+  if (existing) return NextResponse.json({ job: existing, alreadyQueued: true });
   const job = await prisma.scanJob.create({
-    data: {
-      type: "FULL_RESCAN",
-      status: "PENDING",
-      requestedBy: user.id,
-    },
+    data: { type: "FULL_RESCAN", status: "PENDING", requestedBy: owner.id },
   });
-
+  await prisma.auditLog.create({ data: { userId: owner.id, action: "RESCAN_REQUESTED", details: {} } });
+  await notifyScanner();
   return NextResponse.json({ job });
-}
+});
 
-export async function GET() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const user = await prisma.user.findUnique({ where: { email: session.user.email! } });
-  if (!user || user.role !== "OWNER") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  // Cleanup: Keep only the 10 most recent logs
-  const keepJobs = await prisma.scanJob.findMany({
-    orderBy: { requestedAt: "desc" },
-    take: 10,
-    select: { id: true }
+export const GET = route(async () => {
+  await requireOwner();
+  const [jobs, queue, failedRecent, status, heartbeat] = await Promise.all([
+    prisma.scanJob.findMany({
+      where: { type: { in: ["FULL_RESCAN", "INDEX_FILE"] } },
+      orderBy: { requestedAt: "desc" },
+      take: 10,
+    }),
+    prisma.scanJob.groupBy({
+      by: ["status"],
+      where: { type: "PROCESS_FILE", status: { in: ["PENDING", "RUNNING"] } },
+      _count: { _all: true },
+    }),
+    prisma.scanJob.count({
+      where: { type: "PROCESS_FILE", status: "FAILED", completedAt: { gt: new Date(Date.now() - 86_400_000) } },
+    }),
+    prisma.systemStatus.findUnique({ where: { key: "scanner_status" } }),
+    prisma.systemStatus.findUnique({ where: { key: "scanner_heartbeat" } }),
+  ]);
+  const count = (s: string) => queue.find((q) => q.status === s)?._count._all ?? 0;
+  const lastBeat = heartbeat ? new Date(heartbeat.value).getTime() : 0;
+  return NextResponse.json({
+    jobs,
+    scannerStatus: status?.value ?? "idle",
+    scannerOnline: Date.now() - lastBeat < 90_000,
+    processing: { pending: count("PENDING"), running: count("RUNNING"), failedLast24h: failedRecent },
   });
-  const keepIds = keepJobs.map(j => j.id);
-  await prisma.scanJob.deleteMany({
-    where: { id: { notIn: keepIds } }
-  });
+});
 
-  const jobs = await prisma.scanJob.findMany({
-    orderBy: { requestedAt: "desc" },
-    take: 10,
-  });
-
-  const status = await prisma.systemStatus.findUnique({
-    where: { key: "scanner_status" },
-  });
-
-  return NextResponse.json({ jobs, scannerStatus: status?.value ?? "idle" });
-}
-
-export async function DELETE(req: NextRequest) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const user = await prisma.user.findUnique({ where: { email: session.user.email! } });
-  if (!user || user.role !== "OWNER") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-  const { searchParams } = req.nextUrl;
-  const id = searchParams.get("id");
-
+export const DELETE = route(async (req) => {
+  await requireOwner();
+  const id = req.nextUrl.searchParams.get("id");
   if (!id) {
-    // Clear all finished jobs (COMPLETED, FAILED, CANCELLED)
     await prisma.scanJob.deleteMany({
-      where: { status: { in: ["COMPLETED", "FAILED", "CANCELLED"] } },
+      where: { type: { in: ["FULL_RESCAN", "INDEX_FILE"] }, status: { in: ["COMPLETED", "FAILED", "CANCELLED"] } },
     });
     return NextResponse.json({ success: true });
   }
-
   const job = await prisma.scanJob.findUnique({ where: { id } });
-  if (!job) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
+  if (!job) throw notFound();
   if (job.status === "RUNNING" || job.status === "PENDING") {
-    await prisma.scanJob.update({ where: { id }, data: { status: "CANCELLED" } });
+    await prisma.scanJob.update({ where: { id }, data: { status: "CANCELLED", completedAt: new Date() } });
   } else {
     await prisma.scanJob.delete({ where: { id } });
   }
-
   return NextResponse.json({ success: true });
-}
+});

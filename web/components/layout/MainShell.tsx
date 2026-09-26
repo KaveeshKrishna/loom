@@ -6,6 +6,7 @@ import { TopBar } from "./TopBar";
 import { TopBarProvider, useTopBar } from "./TopBarContext";
 import { ClipboardProvider } from "./ClipboardContext";
 import { UploadProvider } from "./UploadContext";
+import { LiveProvider } from "@/lib/client/live";
 import { UploadWidget } from "./UploadWidget";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { GlobalSearchResults } from "@/components/files/GlobalSearchResults";
@@ -120,12 +121,14 @@ function MainShellInner({ children, userName, userEmail, isOwner }: MainShellPro
 
 export function MainShell(props: MainShellProps) {
   return (
-    <TopBarProvider userEmail={props.userEmail}>
-      <ClipboardProvider>
-        <UploadProvider>
-          <MainShellInner {...props} />
-        </UploadProvider>
-      </ClipboardProvider>
-    </TopBarProvider>
+    <LiveProvider>
+      <TopBarProvider userEmail={props.userEmail}>
+        <ClipboardProvider>
+          <UploadProvider>
+            <MainShellInner {...props} />
+          </UploadProvider>
+        </ClipboardProvider>
+      </TopBarProvider>
+    </LiveProvider>
   );
 }

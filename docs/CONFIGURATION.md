@@ -18,7 +18,20 @@ POSTGRES_PASSWORD is the password for the loom PostgreSQL user, and it's require
 
 ## Login (better-auth)
 
-BETTER_AUTH_SECRET signs login sessions and is required, the installer generates a random 48-byte value. Changing it logs everyone out. BETTER_AUTH_URL is the public URL Loom is served at, like https://loom.example.com, required in production, it's used to build auth callback URLs. TRUSTED_ORIGINS is a comma-separated list of origins allowed to make logged-in requests, like https://loom.example.com,http://localhost:8085, it's recommended and defaults to empty. List every hostname and port you'll actually use.
+BETTER_AUTH_SECRET signs login sessions and is required. The installer generates a random 48-byte value. loom-web refuses to start if it's missing, shorter than 32 characters, or still the example value. Changing it logs everyone out. BETTER_AUTH_URL is the public URL Loom is served at, like https://loom.example.com, required in production, it's used to build auth callback URLs. TRUSTED_ORIGINS is a comma-separated list of origins allowed to make logged-in requests, like https://loom.example.com,http://localhost:8085. It's recommended and defaults to empty. List every hostname and port you'll actually use.
+
+Public sign-up is always disabled. The first account is created on the setup page, and after that the Owner adds users in Settings, then Users. Sign-in attempts are rate-limited to 10 per minute per IP address.
+
+## Uploads and background work
+
+These all have sensible defaults. Leave them unset unless you have a reason.
+
+- **LOOM_UPLOAD_CHUNK_MB** (default 32, maximum 95) is the size of each upload chunk. Keep it below your proxy's request-size limit. Cloudflare's is 100 MB, and nginx's `client_max_body_size` must be at least this.
+- **LOOM_MAX_UPLOAD_GB** (default: no limit) caps the size of a single upload. Uploads are always refused if they would leave less than 256 MB free on the drive.
+- **LOOM_WORKER_CONCURRENCY** (default 2, maximum 8) sets how many files the scanner processes in parallel (thumbnails, previews, video posters). Raise it on a machine with more cores; lower it to 1 on a Raspberry Pi.
+- **LOOM_SHARP_THREADS** (default 2) sets how many threads the image library uses per job.
+- **LOOM_MAX_TRANSCODES** (default 2) sets how many videos can be converted for streaming at the same time. Each one uses roughly one CPU core.
+- **LOOM_AUDIT_RETENTION_DAYS** (default 180) sets how long audit log entries are kept.
 
 ## Next.js
 

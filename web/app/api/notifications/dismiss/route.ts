@@ -1,31 +1,15 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+/** POST /api/notifications/dismiss { notificationId? | dismissAll? } — mark read. */
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { route, requireUser, readJson } from "@/lib/http";
 
-export async function POST(req: NextRequest) {
-  try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const body = await req.json();
-    const { notificationId, dismissAll } = body as { notificationId?: string; dismissAll?: boolean };
-
-    if (dismissAll) {
-      await prisma.notification.updateMany({
-        where: { userId: session.user.id, read: false },
-        data: { read: true }
-      });
-    } else if (notificationId) {
-      await prisma.notification.update({
-        where: { id: notificationId, userId: session.user.id },
-        data: { read: true }
-      });
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (err: unknown) {
-    console.error("Notifications Dismiss API Error:", err);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+export const POST = route(async (req) => {
+  const user = await requireUser();
+  const { notificationId, dismissAll } = await readJson<{ notificationId?: string; dismissAll?: boolean }>(req);
+  if (dismissAll) {
+    await prisma.notification.updateMany({ where: { userId: user.id, read: false }, data: { read: true } });
+  } else if (typeof notificationId === "string") {
+    await prisma.notification.updateMany({ where: { id: notificationId, userId: user.id }, data: { read: true } });
   }
-}
+  return NextResponse.json({ success: true });
+});

@@ -31,6 +31,7 @@ model User {
   trashItems     TrashItem[]
   backgroundJobs BackgroundJob[]
   notifications  Notification[]
+  uploadSessions UploadSession[]
 
   @@map("users")
 }
@@ -47,6 +48,7 @@ model Session {
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
   @@map("sessions")
 }
 
@@ -66,6 +68,7 @@ model Account {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
+  @@index([userId])
   @@map("accounts")
 }
 
@@ -119,6 +122,10 @@ model ContentIdentity {
   // Not mathematical proof of bit-identical content; sufficient for deduplication.
   fastHash  String
   createdAt DateTime @default(now())
+  // Media metadata extracted by the scanner the first time the content is
+  // processed: { width, height, takenAt, camera, lens, gps, durationSeconds,
+  // videoCodec, audioCodec, ... }. Shared by every FileNode with this content.
+  mediaInfo Json?
 
   nodes       FileNode[]
   thumbnail   Thumbnail?
@@ -149,6 +156,10 @@ model FileNode {
   // NOT @unique — uniqueness enforced at application level to allow
   // safe Trash state management without ambiguous DB constraints.
   relativePath      String
+  // relativePath of the containing directory ("" for top-level items).
+  // Denormalized so a folder listing is a single indexed equality lookup
+  // instead of a prefix scan over the whole library.
+  parentPath        String       @default("")
   name              String
   type              NodeType
   mimeType          String?
@@ -186,10 +197,22 @@ model FileNode {
 
   favorites    Favorite[]
 
+  // NOTE: two extra indexes live only in migration SQL because Prisma's
+  // schema language cannot express them (see web/prisma/migrations/
+  // 20260926000000_v2_foundation/migration.sql):
+  //   - file_nodes_relativePath_pattern_idx  (text_pattern_ops, for prefix LIKE)
+  //   - file_nodes_live_relativePath_key     (UNIQUE WHERE "inTrash" = false)
+  // If `prisma migrate dev` ever proposes dropping them, delete those lines
+  // from the generated migration.
   @@index([relativePath])
+  @@index([parentPath, inTrash, isVisible])
+  @@index([contentIdentityId])
+  @@index([mimeType, modifiedAt])
+  @@index([modifiedAt])
   @@index([type])
   @@index([inTrash])
   @@index([healthStatus])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "file_nodes_name_trgm_idx")
   @@map("file_nodes")
 }
 
@@ -275,17 +298,23 @@ model Favorite {
   fileNode   FileNode @relation(fields: [fileNodeId], references: [id], onDelete: Cascade)
 
   @@unique([userId, fileNodeId])
+  @@index([fileNodeId])
   @@map("favorites")
 }
 
 // ─────────────────────────────────────────────
 // SCAN JOBS (DB-backed job queue — no filesystem watcher)
+// The scanner claims jobs with SELECT ... FOR UPDATE SKIP LOCKED and is woken
+// instantly by NOTIFY loom_jobs (with a slow poll as a fallback).
 // ─────────────────────────────────────────────
 
 model ScanJob {
   id             String      @id @default(cuid())
-  // FULL_RESCAN — walk all of /media (Owner-only Rescan Library action)
-  // INDEX_FILE  — index a single file after an internal upload
+  // FULL_RESCAN  — walk all of /media (Owner-only Rescan Library action)
+  // INDEX_FILE   — index a single path (legacy; kept for old queued rows)
+  // PROCESS_FILE — generate derived media (hash, thumbnail, preview, probe,
+  //                EXIF) for one FileNode after an upload/edit. Runs in its own
+  //                lane so it never waits behind a full rescan.
   type           ScanType    @default(FULL_RESCAN)
   status         ScanStatus  @default(PENDING)
   requestedBy    String?
@@ -295,17 +324,25 @@ model ScanJob {
   error          String?
   processedFiles Int         @default(0)
   totalFiles     Int         @default(0)
-  // Only set for INDEX_FILE jobs: relative path inside /media
+  // Only set for INDEX_FILE / PROCESS_FILE jobs: relative path inside /media
   targetPath     String?
+  // PROCESS_FILE only: the node to process and the sourceVersion it had when
+  // the job was queued. If the file changed since, the job is skipped (a
+  // newer job will have been queued for the new version).
+  fileNodeId     String?
+  sourceVersion  String?
+  attempts       Int         @default(0)
 
   user           User?       @relation(fields: [requestedBy], references: [id])
 
+  @@index([status, type, requestedAt])
   @@map("scan_jobs")
 }
 
 enum ScanType {
   FULL_RESCAN
   INDEX_FILE
+  PROCESS_FILE
 }
 
 enum ScanStatus {
@@ -351,7 +388,11 @@ model AuditLog {
 //   FileNode.relativePath    = current logical filesystem location
 //   TrashItem.originalPath   = exact path before deletion (for restore)
 //   TrashItem.trashPath      = physical path inside .LoomTrash/
-// Restoration stops (409) if originalPath is occupied — no silent renames.
+// Restoration stops (409) if originalPath is occupied — no silent renames,
+// unless the user explicitly picks "keep both" or a different destination.
+// kind = "DELETE"  — the item was deleted by a user
+// kind = "VERSION" — a previous version saved automatically before an
+//                    in-browser text edit overwrote the file
 // ─────────────────────────────────────────────
 
 model TrashItem {
@@ -364,12 +405,16 @@ model TrashItem {
   deletedAt       DateTime @default(now())
   // Automatically purged 15 days after deletion
   expiresAt       DateTime
-  deletedByUserId String
+  // Null once the deleting user's account is removed (the item stays in the
+  // Owner's trash view until it expires).
+  deletedByUserId String?
+  kind            String   @default("DELETE")
 
-  user            User     @relation(fields: [deletedByUserId], references: [id])
+  user            User?    @relation(fields: [deletedByUserId], references: [id], onDelete: SetNull)
   fileNode        FileNode @relation(fields: [fileNodeId], references: [id], onDelete: Cascade)
 
   @@index([expiresAt])
+  @@index([deletedByUserId])
   @@map("trash_items")
 }
 
@@ -396,6 +441,38 @@ model BackgroundJob {
 
   @@index([userId, status])
   @@map("background_jobs")
+}
+
+// ─────────────────────────────────────────────
+// UPLOAD SESSIONS
+// One row per in-progress chunked upload. Bytes are appended to
+// /media/.tmp-upload/{id}.partial; `received` always equals the partial
+// file's size after each accepted chunk, which makes resuming idempotent.
+// Expired sessions (and their partial files) are purged by the scanner.
+// ─────────────────────────────────────────────
+
+model UploadSession {
+  id           String   @id @default(cuid())
+  userId       String
+  // Destination directory relative to /media ("" = root)
+  destDir      String
+  // Path of the file relative to destDir (folder uploads include sub-dirs)
+  relativePath String
+  size         BigInt
+  received     BigInt   @default(0)
+  // Client-side File.lastModified (ms) — applied to the final file so photos
+  // and videos keep their original dates.
+  lastModified BigInt?
+  mimeType     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  expiresAt    DateTime
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("upload_sessions")
 }
 
 // ─────────────────────────────────────────────

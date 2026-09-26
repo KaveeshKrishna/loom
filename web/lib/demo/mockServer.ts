@@ -12,6 +12,7 @@
  * Worker at web/public/demo-sw.js instead. See that file's header comment.
  */
 import { getState, mutate, nextId } from "./state";
+import { demoUploadSessions, DEMO_CHUNK_SIZE } from "./mockUpload";
 import { DemoFileNode, DemoAclRule, DemoUser, DemoAuditLog, DemoNotification, DEMO_OWNER_ID } from "./types";
 
 const realFetch = typeof window !== "undefined" ? window.fetch.bind(window) : (undefined as unknown as typeof fetch);
@@ -591,6 +592,28 @@ function route(method: string, path: string, ctx: Ctx): unknown {
   if (p === "/thumbnail-cache" && M("DELETE")) {
     mutate((st) => { st.thumbCacheStats = { thumbCount: 0, previewCount: 0, physicalFiles: 0 }; });
     return { success: true };
+  }
+
+  // ── chunked upload sessions (bytes are "sent" by the XHR shim in mockUpload.ts) ──
+  if (p === "/upload/sessions" && M("POST")) {
+    const size = Number(ctx.body.size ?? 0);
+    const relativePath = String(ctx.body.relativePath ?? "file");
+    const destDir = String(ctx.body.destDir ?? "");
+    const id = nextId("upload").replace(/[^a-z0-9]/gi, "");
+    demoUploadSessions.set(id, { id, destDir, relativePath, size, received: 0, mimeType: String(ctx.body.mimeType ?? "") });
+    return { id, destDir, relativePath, size, received: 0, chunkSize: DEMO_CHUNK_SIZE };
+  }
+  if (p === "/upload/sessions" && M("GET")) {
+    return { sessions: [...demoUploadSessions.values()].map((u) => ({ ...u, chunkSize: DEMO_CHUNK_SIZE })) };
+  }
+  if (seg[0] === "upload" && seg[1] === "sessions" && seg[2]) {
+    const sess = demoUploadSessions.get(seg[2]);
+    if (!sess) throw fail(404, "Upload not found or expired");
+    if (M("GET")) return { ...sess, chunkSize: DEMO_CHUNK_SIZE };
+    if (M("DELETE")) {
+      demoUploadSessions.delete(seg[2]);
+      return { success: true };
+    }
   }
 
   throw fail(404, `Demo: no mock handler for ${method} ${path}`);

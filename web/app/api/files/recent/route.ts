@@ -1,28 +1,28 @@
+/** GET /api/files/recent — most recently modified files (newest first). */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { auth } from "@/lib/auth";
-import { checkAccess } from "@/lib/acl";
-import { serializeNodes } from "@/lib/utils";
-import { headers } from "next/headers";
+import { route, requireUser, intParam } from "@/lib/http";
+import { getAcl } from "@/lib/acl";
+import { nodeInclude, serializeListed } from "@/lib/listing";
 
-export async function GET() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const user = await prisma.user.findUnique({ where: { email: session.user.email! } });
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const nodes = await prisma.fileNode.findMany({
-    where: { isVisible: true, type: "FILE", inTrash: false },
-    include: { contentIdentity: { include: { thumbnail: true, preview: true } } },
-    orderBy: { modifiedAt: "desc" },
-    take: 100,
-  });
-
-  if (user.role === "OWNER") return NextResponse.json({ nodes: serializeNodes(nodes) });
-
-  const filtered = (await Promise.all(nodes.map(async (n) => ({
-    node: n, allowed: await checkAccess(user.id, user.role, n.relativePath),
-  })))).filter(r => r.allowed).map(r => r.node).slice(0, 50);
-
-  return NextResponse.json({ nodes: serializeNodes(filtered) });
-}
+export const GET = route(async (req) => {
+  const user = await requireUser();
+  const acl = await getAcl(user);
+  const limit = intParam(req.nextUrl.searchParams.get("limit"), 100, 1, 500);
+  const out = [];
+  let skip = 0;
+  // Page through until we have `limit` items the user may see.
+  while (out.length < limit && skip < 20_000) {
+    const batch = await prisma.fileNode.findMany({
+      where: { isVisible: true, type: "FILE", inTrash: false, modifiedAt: { not: null } },
+      include: nodeInclude,
+      orderBy: { modifiedAt: "desc" },
+      skip,
+      take: 200,
+    });
+    if (batch.length === 0) break;
+    skip += batch.length;
+    for (const n of batch) if (acl.canAccess(n.relativePath)) out.push(n);
+  }
+  return NextResponse.json({ nodes: await serializeListed(out.slice(0, limit)) });
+});

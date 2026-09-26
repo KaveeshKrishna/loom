@@ -47,11 +47,20 @@ npx prisma migrate dev --name describe_your_change
 
 That writes a new migration under web/prisma/migrations/. Commit the SQL it generates and don't edit old migrations by hand.
 
+Keep migrations additive: new columns need a default or a backfill, and never drop a column or table that holds user data. People update in place with `./scripts/update.sh` and expect their data to survive. Two indexes live only in migration SQL because Prisma's schema language can't express them: `file_nodes_relativePath_pattern_idx` and the partial unique `file_nodes_live_relativePath_key`. If `prisma migrate dev` ever proposes dropping them, delete those lines from the generated migration.
+
 ## Code notes
 
 A few things that aren't obvious from any one file, worth keeping in mind before touching filesystem or API code.
 
-Any API response with a FileNode or ContentIdentity in it has to go through serializeNode or serializeNodes from web/lib/utils.ts, both types have BigInt fields that break normal JSON serialization. Every query for files a user can see needs inTrash: false in the where, or trashed files show up all over the app. Call resolveAndValidate() from web/lib/path-security.ts before any filesystem operation, don't build absolute paths yourself. An empty string is a valid path, it means the media root, check it with == null and not !destDir. Moving, renaming, or trashing a folder has to cascade to every child FileNode's relativePath and inTrash, or the children get out of sync with the disk.
+- **API routes.** Wrap handlers in `route()` from web/lib/http.ts and get the caller with `requireUser()` / `requireOwner()`. Throw `HttpError` (or `badRequest`, `forbidden`, …) for expected failures; everything else becomes a generic 500 without leaking internals.
+- **Paths.** Never `path.join()` request data yourself. Use `normalizeRelPath()`, `validateName()` and `resolveMediaPath()` from web/lib/fs-guard.ts. An empty string is a valid path, the media root, so check it with `== null`, not `!destDir`.
+- **Permissions.** Load an evaluator once per request with `getAcl(user)` (web/lib/acl.ts). Use `canTraverse` for listing, `canAccess` for reading or changing an item, and `canAccessTree` before operating on a folder.
+- **Changing files.** Go through web/lib/file-ops.ts. Don't write new ad-hoc fs.rename/fs.rm code in routes; the helpers handle locking, trash-instead-of-overwrite, rollback, and one-statement descendant updates.
+- **JSON.** FileNode and ContentIdentity have BigInt fields. Serialize with `serializeListed()` (web/lib/listing.ts) or `toJson()` (web/lib/http.ts).
+- **Queries.** Every query for files a user can see needs `inTrash: false`. A folder listing is `parentPath = <folder>`, and new rows must set `parentPath`.
+- **Background work.** Queue it with `queueProcessFile()` + `notifyScanner()` (web/lib/jobs.ts), and announce index changes with `publishChange()` (web/lib/events.ts) so open tabs update.
+- **Demo.** The public demo (loom-demo/) has no server. Every new JSON API route needs a handler in web/lib/demo/mockServer.ts. Anything loaded by `<img>`, `<video>` or `<a href>` needs web/public/demo-sw.js instead.
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) covers the reasoning behind these: idle-drive scanning, dedup by content, trash behavior.
 

@@ -10,7 +10,8 @@ import type { FileNode, Thumbnail, Preview } from "@prisma/client";
 import { useTopBar } from "@/components/layout/TopBarContext";
 import { useContextMenu } from "@/hooks/useContextMenu";
 import { EmptySpaceContextMenu } from "@/components/files/EmptySpaceContextMenu";
-import { useUpload } from "@/components/layout/UploadContext";
+import { useUploadActions } from "@/components/layout/UploadContext";
+import { useDirChanges, useLiveConnected } from "@/lib/client/live";
 import { useSelection } from "@/hooks/useSelection";
 import { Trash, CheckSquare } from "lucide-react";
 
@@ -41,7 +42,7 @@ export default function FilesPage() {
   const [searching, setSearching] = useState(false);
   const { viewMode, setBreadcrumbs, searchQuery, searchGlobal } = useTopBar();
   const emptySpaceContextMenu = useContextMenu();
-  const { enqueueFiles } = useUpload();
+  const { enqueueFiles } = useUploadActions();
   const [isDragOver, setIsDragOver] = useState(false);
   const dragCounterRef = useRef(0);
   
@@ -69,39 +70,46 @@ export default function FilesPage() {
   } | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
 
+  const loadSeq = useRef(0);
+  const fetchFiles = useCallback(
+    async (silent: boolean) => {
+      const seq = ++loadSeq.current;
+      if (!silent) setLoading(true);
+      try {
+        const [files, favs] = await Promise.all([
+          fetch(`/api/files?path=${encodeURIComponent(currentPath)}`).then((r) => r.json()),
+          fetch("/api/favorites?ids=1").then((r) => r.json()).catch(() => ({ ids: [] })),
+        ]);
+        if (seq !== loadSeq.current) return; // a newer load superseded this one
+        setNodes(files.children ?? []);
+        setFavoriteIds(new Set<string>(favs.ids ?? []));
+      } catch {
+        /* keep what we have */
+      } finally {
+        if (seq === loadSeq.current) setLoading(false);
+      }
+    },
+    [currentPath]
+  );
+
   useEffect(() => {
-    const controller = new AbortController();
-    const fetchFiles = () => {
-      setLoading(true);
-      fetch(`/api/files?path=${encodeURIComponent(currentPath)}`, { signal: controller.signal })
-        .then((r) => r.json())
-        .then((data) => {
-          setNodes(data.children ?? []);
-          setLoading(false);
-        })
-        .catch((err) => { if (err.name !== "AbortError") setLoading(false); });
-
-      fetch("/api/favorites", { signal: controller.signal })
-        .then((r) => r.json())
-        .then((data) => {
-          const ids = (data.favorites ?? []).map(
-            (f: { fileNodeId: string }) => f.fileNodeId
-          );
-          setFavoriteIds(new Set(ids));
-        })
-        .catch(() => {});
-    };
-
-    fetchFiles();
-
-    const handleRefresh = () => fetchFiles();
+    fetchFiles(false);
+    const handleRefresh = () => fetchFiles(true);
     window.addEventListener("loom-refresh", handleRefresh);
+    return () => window.removeEventListener("loom-refresh", handleRefresh);
+  }, [fetchFiles]);
 
-    return () => {
-      window.removeEventListener("loom-refresh", handleRefresh);
-      controller.abort();
-    };
-  }, [currentPath]);
+  // Live updates: uploads finishing, thumbnails appearing, other users' changes.
+  useDirChanges(currentPath, () => fetchFiles(true));
+
+  // Without a live connection, poll while thumbnails are still being generated.
+  const liveConnected = useLiveConnected();
+  const hasProcessing = nodes.some((n) => (n as unknown as { processing?: boolean }).processing);
+  useEffect(() => {
+    if (liveConnected || !hasProcessing) return;
+    const t = setInterval(() => fetchFiles(true), 4000);
+    return () => clearInterval(t);
+  }, [liveConnected, hasProcessing, fetchFiles]);
 
   useEffect(() => {
     const controller = new AbortController();

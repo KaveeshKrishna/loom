@@ -1,39 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { sanitizePath } from "@/lib/utils";
-import { createReadStream } from "fs";
-import { stat } from "fs/promises";
-import { join } from "path";
-import mime from "mime-types";
-import { headers } from "next/headers";
-import { Readable } from "stream";
+/** GET /api/cache?path=<cachePath> — legacy alias of /api/cache/<cachePath>. */
+import { route, requireUser } from "@/lib/http";
+import { getAcl } from "@/lib/acl";
+import { resolveCachePath } from "@/lib/cache-access";
+import { sendFile } from "@/lib/send-file";
 
-const CACHE_ROOT = "/cache";
-
-export async function GET(req: NextRequest) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const rawPath = req.nextUrl.searchParams.get("path") ?? "";
-  const relativePath = sanitizePath(rawPath);
-  if (!relativePath) return NextResponse.json({ error: "Path required" }, { status: 400 });
-
-  const absolutePath = join(CACHE_ROOT, relativePath);
-  if (!absolutePath.startsWith(CACHE_ROOT + "/")) {
-    return NextResponse.json({ error: "Invalid path" }, { status: 400 });
-  }
-
-  try {
-    await stat(absolutePath);
-    const mimeType = mime.lookup(absolutePath) || "image/webp";
-    const stream = createReadStream(absolutePath);
-    return new NextResponse(Readable.toWeb(stream) as ReadableStream, {
-      headers: {
-        "Content-Type": mimeType,
-        "Cache-Control": "public, max-age=86400, immutable",
-      },
-    });
-  } catch {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-}
+export const GET = route(async (req) => {
+  const user = await requireUser();
+  const acl = await getAcl(user);
+  const segments = (new URL(req.url).searchParams.get("path") ?? "").split("/");
+  const abs = await resolveCachePath(segments, acl);
+  return sendFile(req, abs, { filename: segments[segments.length - 1], cacheControl: "private, max-age=604800" });
+});

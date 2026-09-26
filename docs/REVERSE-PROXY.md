@@ -29,7 +29,7 @@ server {
     ssl_certificate     /etc/letsencrypt/live/loom.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/loom.example.com/privkey.pem;
 
-    client_max_body_size 0;  # uploads can be big
+    client_max_body_size 128m;  # uploads arrive in 32 MB chunks
 
     location / {
         proxy_pass http://127.0.0.1:8085;
@@ -41,6 +41,18 @@ server {
         # HLS streaming holds the connection open while segments are made
         proxy_read_timeout 60s;
         proxy_buffering off;
+        proxy_request_buffering off;
+    }
+
+    # Live updates (Server-Sent Events): never buffer, keep the connection open
+    location /api/events {
+        proxy_pass http://127.0.0.1:8085;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
     }
 }
 ```
@@ -78,4 +90,9 @@ sudo systemctl restart cloudflared
 
 ## Big uploads and slow requests
 
-Two things worth checking with any proxy. First, no body size limit, large video uploads need client_max_body_size 0; in nginx, or the equivalent for your proxy. Second, long enough timeouts, the first request for a region of a video can take a few seconds while HLS segments are made, and a very short proxy timeout will cut that off, 60 seconds is a safe minimum.
+Things worth checking with any proxy:
+
+- **Request size.** Uploads are sent in chunks of 32 MB by default (`LOOM_UPLOAD_CHUNK_MB`), so the proxy only needs to allow requests somewhat larger than one chunk. In nginx that's `client_max_body_size 128m;`. This is also why uploads work through Cloudflare, which caps requests at 100 MB. Keep the chunk size below your proxy's limit.
+- **Timeouts.** The first request for a region of a video can take a few seconds while HLS segments are made, and a very short proxy timeout will cut that off. 60 seconds is a safe minimum.
+- **Live updates.** `/api/events` is a Server-Sent Events stream that stays open. Proxies must not buffer it: `proxy_buffering off` in nginx; Caddy and Cloudflare handle it automatically. If it's buffered, Loom still works, but new thumbnails take a few seconds longer to appear.
+- **Client IP.** Pass `X-Forwarded-For` so sign-in rate limiting applies per visitor rather than to the proxy itself.
