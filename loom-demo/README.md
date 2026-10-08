@@ -49,6 +49,18 @@ bash loom-demo/build.sh --regen-photos   # also regenerate the placeholder photo
 
 `loom-demo/dist/` is gitignored; it's a build artifact. Re-run the same command after any frontend change, and serve the new `dist/`.
 
+The build uses `web/node_modules`, which must match `web/package-lock.json`. If that folder can't be updated (for example it was created by a container as root), install the dependencies somewhere else and point the build at them:
+
+```bash
+mkdir -p /tmp/demo-deps/prisma
+cp web/package.json web/package-lock.json /tmp/demo-deps/
+cp web/prisma/schema.prisma /tmp/demo-deps/prisma/
+(cd /tmp/demo-deps && npm ci --legacy-peer-deps --ignore-scripts && npx prisma generate)
+LOOM_DEMO_NODE_MODULES=/tmp/demo-deps/node_modules bash loom-demo/build.sh
+```
+
+`prisma generate` is needed because the frontend imports Prisma's generated types.
+
 Placeholder videos (`web/public/demo-assets/videos/`) are generated separately with ffmpeg in a throwaway container. They don't need Node or sharp, so keeping that out of `build.sh` keeps it fast:
 
 ```bash

@@ -29,7 +29,11 @@ if [ "${1:-}" = "--regen-photos" ]; then
   ( cd "$WEB" && npx tsx lib/demo/generate-assets.ts )
 fi
 
-if [ ! -d "$WEB/node_modules" ]; then
+# LOOM_DEMO_NODE_MODULES: use a node_modules folder other than web/'s, e.g.
+# when web/node_modules was created by a container as root and can't be
+# updated. It must match web/package-lock.json.
+NODE_MODULES="${LOOM_DEMO_NODE_MODULES:-$WEB/node_modules}"
+if [ ! -d "$NODE_MODULES" ]; then
   echo "-> Installing web/ dependencies (first run)"
   ( cd "$WEB" && npm ci --legacy-peer-deps )
 fi
@@ -40,7 +44,7 @@ trap cleanup EXIT
 
 echo "-> Copying web/ into a scratch build directory"
 rsync -a --exclude node_modules --exclude .next --exclude out --exclude '*.tsbuildinfo' "$WEB/" "$TMP/web/"
-ln -s "$WEB/node_modules" "$TMP/web/node_modules"
+ln -s "$NODE_MODULES" "$TMP/web/node_modules"
 
 cd "$TMP/web"
 
