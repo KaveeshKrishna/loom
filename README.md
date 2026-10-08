@@ -1,44 +1,63 @@
 # Loom
 
-Loom is a self-hosted file manager for a server or NAS. You point it at a folder of files you already have (photos, videos, documents, whatever) and it gives you a web app to browse, search, and stream them from anywhere.
+Loom is a self-hosted file manager for your own server or NAS. Point it at a folder of files you already have (photos, videos, music, documents, anything) and it gives you a fast web app to browse, search, stream, share, and organize them from anywhere.
 
-The whole idea is that your files don't move. Loom reads the folder you give it and shows you what's there. It doesn't copy your files into its own storage and it doesn't rearrange them. If you stop using Loom one day, your files are exactly where they were.
+It is built around one rule: **your files stay exactly where they are, organized exactly how you left them.** Loom reads the folder you give it and shows you what's there. It never imports your files into its own storage, never renames or rearranges them, and never overwrites them. If you stop using Loom one day, your files are exactly where they were.
 
-Try the [live demo](https://loomdemo.kaveeshkrishna.in). It's a fake version with no backend and no real data, any username and password works. The code for it is in the [loom-demo](loom-demo/) folder.
+**[Try the live demo](https://loomdemo.kaveeshkrishna.in).** It's a fully fabricated build with no backend and no real data. Any username and password works. See [loom-demo/](loom-demo/) for how it's built.
 
-## What it does
+## Features
 
-- Browse your files in a grid or a list that stays fast with tens of thousands of files in a folder. Sort by name, date, size or type, filter by kind (photos, videos, audio, documents, folders), and open a details panel with EXIF (camera, date taken, location), video codec and resolution, and recent activity.
-- Upload anything, any size. Drag files or whole folders onto the page, or use the New button. Big videos are sent in verified chunks, so they work behind Cloudflare and other proxies, resume after a dropped connection, a closed tab or a power cut, and never fill the server's memory. Nothing half-finished ever shows up in your folders. An upload counts as done the moment its last byte is safely stored. Thumbnails and previews appear a few seconds later, on their own.
-- Manage files like a desktop app:
-  - Rename inline (F2), make folders and text files.
-  - Cut, copy and paste, or Move to… and Copy to… with a folder picker.
-  - Drag onto folders, breadcrumbs or the sidebar to move things.
-  - Select many items and move, copy, star, download or delete them together.
-  - Keyboard shortcuts throughout.
-  - Undo for moves, renames and deletes.
-  - If a name is already taken, Loom asks, like Windows: replace, skip or keep both, with "do this for all". Folders merge. Replace never destroys anything, because the old item goes to Trash.
-- Download single files directly, or any selection of files and folders as one ZIP, streamed on the fly with no size limit.
-- Share links. Send anyone a link to a file or folder, no account needed. Links can have an expiry, a password, and a view-only mode, and you can revoke them at any time. Sharing is off until the Owner turns it on.
-- View and edit:
-  - Full screen viewer with a filmstrip: photos with zoom, pan and slideshow; videos; audio with auto-advance; PDFs.
-  - Text, code and Markdown with syntax highlighting.
-  - Edit text files right in the browser. Saving is conflict-safe, and the previous version is kept in Trash.
-- Video streaming. Videos the browser can play are streamed as-is. Everything else (HEVC, 10-bit, MOV, MKV, AVI, AC3 audio…) is converted while you watch, only the part you're watching. You can seek anywhere instantly.
-- Live updates. Folders refresh by themselves when uploads finish, thumbnails are ready, or someone else changes something.
-- Deduplication. If the same file exists in more than one place, Loom only makes one thumbnail, preview and video cache for it.
-- Trash. Deleted files go to Trash for 15 days. You can restore to the original place or somewhere else, and conflicts are handled instead of overwritten.
-- Health checks. Broken or unsupported files are flagged on their own page, so you don't confuse them with missing ones.
-- More than one user. There's an Owner role and a Family role, and Family users can be limited to certain folders. Nobody can sign up on their own.
-- Audit log. Every change is logged.
-- Storage. See how full your drive is and what your library is made of.
-- Leaves your drive alone. Loom doesn't watch the disk and doesn't scan on startup, so drives can spin down and stay down until you ask for a rescan.
+**Browsing**
+- Grid and list views that stay fast with tens of thousands of files in one folder.
+- Sort by name, date, size or type, and filter by kind (photos, videos, audio, documents, folders).
+- Library-wide views for Photos, Videos, Audio, Documents, Starred and Recent.
+- Search the current folder or the whole library.
+- A details panel with EXIF data (camera, lens, date taken, GPS location), video resolution and codecs, file health, and recent activity.
+- Live updates: folders refresh on their own when an upload finishes, a thumbnail is ready, or someone else changes something.
 
-## What you need
+**Uploading**
+- Drag and drop files or whole folders, or use the New button.
+- Any size. Files are sent in verified 32 MB chunks straight to disk, so a 50 GB video uses as little server memory as a photo, and uploads work behind Cloudflare and other proxies with request size limits.
+- Resumable after a dropped connection, a closed tab, or a power cut. Nothing half-finished ever appears in your folders.
+- An upload counts as done the moment its last byte is safely stored. Thumbnails and previews are generated in the background a few seconds later.
 
-A Linux server, or anything that can run Docker, is the point. A home server, NAS, or VPS all work. You'll need Docker Engine and Docker Compose v2, the folder of files you want to manage, and some free space somewhere else for the thumbnail/preview/video cache (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for why). If you want to reach Loom from outside your home network you'll also want a reverse proxy like Caddy or nginx, or a tunnel like Cloudflare Tunnel, see [docs/REVERSE-PROXY.md](docs/REVERSE-PROXY.md).
+**Organizing**
+- Rename inline (F2), create folders and text files, cut/copy/paste, Move to… and Copy to… with a folder picker.
+- Drag items onto folders, breadcrumbs or the sidebar to move them.
+- Multi-select with bulk move, copy, star, download and delete.
+- Undo for moves, renames and deletes, plus keyboard shortcuts throughout.
+- Windows-style name conflicts: Replace, Skip or Keep both, with "do this for all". Same-named folders merge. Replace never destroys anything, the old item goes to Trash.
+- Big copies run in the background with progress and Cancel.
 
-## Install
+**Viewing and editing**
+- Full-screen viewer with a filmstrip: photos (zoom, pan, slideshow), video, audio (auto-advance), and PDF.
+- Text, code (syntax highlighted) and Markdown (rendered).
+- Edit text files in the browser. Saving detects changes made on disk in the meantime, and the previous version is kept in Trash.
+- Video streaming for any format. Browser-compatible videos play directly. Everything else (HEVC, 10-bit, MOV, MKV, AVI, AC3 audio…) is converted on the fly, only the part you are watching, and you can seek anywhere instantly.
+- Download any selection of files and folders as one ZIP, streamed with no size limit.
+
+**Sharing and users**
+- Share links to a file or folder for people without an account, with optional password, expiry and view-only mode. Revocable at any time. Off until the Owner turns it on.
+- Multiple users with two roles, Owner and Family. Family users can be restricted to specific folders. Nobody can sign up on their own.
+- An audit log of every change.
+
+**Safety**
+- Deleted files go to Trash for 15 days. Restore to the original location or somewhere else, with conflicts handled rather than overwritten.
+- Crash safety: copies, edits and uploads are written to hidden temp files and only put in place when complete. A journal lets Loom finish or undo interrupted operations on the next start.
+- File health: corrupt and unsupported files are flagged on their own page, so you don't confuse them with missing ones.
+- Content deduplication: identical files share one thumbnail, preview and video cache.
+- Idle by default: no filesystem watcher, no scan on startup, no hashing during a rescan. Drives can spin down and stay down.
+
+## Requirements
+
+- A Linux server, or any machine that can run Docker. A home server, NAS or VPS is the intended use.
+- [Docker Engine](https://docs.docker.com/engine/install/) and [Docker Compose v2](https://docs.docker.com/compose/install/).
+- The folder of files you want to manage, plus free space on a separate path for the thumbnail, preview and video cache (see [How Loom works](docs/ARCHITECTURE.md)).
+- `git`, `openssl` and `curl` on the host (the installer uses them).
+- To reach Loom from outside your home network: a reverse proxy (Caddy, nginx, Traefik) or a tunnel (Cloudflare Tunnel, Tailscale). See [docs/REVERSE-PROXY.md](docs/REVERSE-PROXY.md).
+
+## Quick start
 
 ```bash
 git clone https://github.com/kaveeshkrishna/loom.git
@@ -46,25 +65,40 @@ cd loom
 ./scripts/install.sh
 ```
 
-The installer asks where your files are, makes the secrets, builds the containers, and starts everything. When it finishes, open the URL it prints and make your Owner account. Loom notices it's a fresh install and shows a setup page instead of a login form.
+The installer asks where your files live and where the cache should go, generates secrets, builds the containers, starts everything and waits until it's healthy. When it's done, open the URL it prints and create your Owner account. A fresh install shows a setup page instead of a login form automatically.
 
-If you'd rather do it by hand, see [docs/INSTALLATION.md](docs/INSTALLATION.md).
+To do it by hand, or to see every option, read [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
-## Config
+## Configuration
 
-Everything lives in one .env file in the repo root, which the installer makes from .env.example. The main things in there are LOOM_MEDIA_PATH (where your files are on the host), LOOM_CACHE_PATH (where the cache goes), LOOM_BIND and LOOM_PORT (local address and port for the web app), POSTGRES_PASSWORD and BETTER_AUTH_SECRET (both generated automatically by the installer), and BETTER_AUTH_URL / TRUSTED_ORIGINS (the public URL you'll use to reach Loom). Full list in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+All configuration lives in a single `.env` file in the repo root, generated from `.env.example` by the installer. The essentials:
 
-## Running it
+| Variable | Purpose |
+|---|---|
+| `LOOM_MEDIA_PATH` | Host path to the folder of files Loom manages |
+| `LOOM_CACHE_PATH` | Host path for thumbnails, previews and the video cache (must not be inside the media folder) |
+| `LOOM_BIND` / `LOOM_PORT` | Local address and port for the web app (default `127.0.0.1:8085`) |
+| `POSTGRES_PASSWORD` | Database password (generated by the installer) |
+| `BETTER_AUTH_SECRET` | Session and share-link signing secret (generated by the installer, required) |
+| `BETTER_AUTH_URL` / `TRUSTED_ORIGINS` | The public URL you'll reach Loom at, also used for share links |
+
+Upload chunk size, worker concurrency, transcode limits and the rest are optional. Full reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
+## Day-to-day commands
 
 ```bash
-docker compose ps                       # what's running
+docker compose ps                       # service status
 docker compose logs -f loom-web         # web app logs
 docker compose logs -f loom-scanner     # scanner logs
+./scripts/update.sh                     # update to the latest version (backs up first)
+./scripts/update.sh --check             # is there a new version?
+./scripts/update.sh --rollback          # go back to the version before the last update
 ./scripts/backup-db.sh                  # back up the database
+./scripts/restore-db.sh <backup>        # restore a database backup
 ./scripts/uninstall.sh                  # stop and remove the containers
 ```
 
-Files you upload through Loom are indexed and processed automatically. Files you add or change outside Loom (straight on the drive, over SMB, etc.) show up after a rescan. Rescans are manual on purpose: as the Owner, go to Settings, then Scanner, then Scan Now. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains why.
+Files you upload or change through Loom are indexed and processed automatically. Files added or changed outside Loom (directly on the drive, over SMB, etc.) appear after a rescan, which is manual by design: as the Owner, go to **Settings → Scanner → Scan Now**. [How Loom works](docs/ARCHITECTURE.md#keeping-the-drive-idle) explains why.
 
 ## Updating
 
@@ -72,20 +106,36 @@ Files you upload through Loom are indexed and processed automatically. Files you
 ./scripts/update.sh
 ```
 
-It shows what's new and asks first. Then it backs up the database (and checks the backup), downloads the new version, builds it while the old one keeps running, restarts, and waits until everything is healthy. If anything goes wrong, `./scripts/update.sh --rollback` takes you back. Your media folder is never touched by installing, updating or uninstalling. `./scripts/update.sh --check` just tells you whether there's a new version. Details, and notes for specific versions, are in [docs/UPGRADING.md](docs/UPGRADING.md) and [CHANGELOG.md](CHANGELOG.md).
+It shows the new version and its changes and asks before doing anything. Then it backs up the database (and verifies the backup), fast-forwards the code, builds the new images while the old version keeps running, restarts, and waits until everything is healthy. If anything fails it offers to roll back. Your media folder is never touched by installing, updating or uninstalling. See [docs/UPGRADING.md](docs/UPGRADING.md) and [CHANGELOG.md](CHANGELOG.md).
 
-## Docs
+## Documentation
 
-[Using Loom](docs/USING.md) (features and keyboard shortcuts), [Installation](docs/INSTALLATION.md), [Configuration](docs/CONFIGURATION.md), [How Loom works](docs/ARCHITECTURE.md), [Reverse proxy setup](docs/REVERSE-PROXY.md), [Upgrading](docs/UPGRADING.md), and [Troubleshooting](docs/TROUBLESHOOTING.md) are all in the docs folder.
+| Document | What's in it |
+|---|---|
+| [Using Loom](docs/USING.md) | A tour of the features, keyboard shortcuts, sharing, Trash, Owner settings |
+| [Installation](docs/INSTALLATION.md) | The installer, manual setup, file permissions, first login |
+| [Configuration](docs/CONFIGURATION.md) | Every environment variable |
+| [How Loom works](docs/ARCHITECTURE.md) | Architecture, background jobs, uploads, crash safety, share links, security |
+| [Reverse proxy](docs/REVERSE-PROXY.md) | Caddy, nginx, Traefik and Cloudflare Tunnel setups |
+| [Upgrading](docs/UPGRADING.md) | Updates, rollback, backups, version-specific notes |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Common problems and their fixes |
+| [Changelog](CHANGELOG.md) | What changed in each version |
 
-## Rules Loom follows
+## Design rules
 
-These are things the code will not do, on purpose. It never deletes or overwrites your original files: deletes, replaces and text edits all keep the old version in a Trash you can undo. It never moves or renames your existing folders on its own, and it never reorganizes your folder structure. Thumbnails, previews, and metadata only go in the separate cache folder, never next to your files. Your filesystem is the truth, the database is just an index of it, and if they disagree the filesystem is right. Loom fits your folders, your folders don't have to fit Loom.
+These are invariants Loom is built around, not aspirations:
+
+1. Loom never deletes or overwrites your original files. Deletes, replaces and text edits all keep the old version in a recoverable Trash.
+2. Loom never moves or renames your existing folders on its own.
+3. Loom never reorganizes your folder structure.
+4. Thumbnails, previews and metadata are written only to the separate cache folder, never next to your files.
+5. Your filesystem is the source of truth. The database is only an index of it, and if they disagree, the filesystem wins.
+6. Loom adapts to your folder structure. Your files never have to adapt to Loom.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). For security bugs, read [SECURITY.md](SECURITY.md) first.
+Contributions are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). Please read [SECURITY.md](SECURITY.md) before reporting a vulnerability.
 
 ## License
 
-Loom uses the [PolyForm Noncommercial License 1.0.0](LICENSE). You can use, change, self-host, and share it for anything noncommercial, personal use, home labs, nonprofits, school, research. Charging money for Loom, or for a service built on it, needs a separate agreement with me. That makes Loom source-available, not OSI open source, and the license file has the exact wording.
+Loom is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). You're free to use, modify, self-host and share Loom for any **noncommercial** purpose: personal use, home labs, nonprofits, education, research. Commercial use (offering Loom, or a service built on it, for a fee) requires a separate agreement with the author. This makes Loom **source-available**, not OSI-approved open source. See the license for the exact terms.

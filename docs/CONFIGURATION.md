@@ -1,49 +1,82 @@
 # Configuration
 
-All config is environment variables in .env at the repo root, which Docker Compose loads for each service. .env.example has the defaults, and the installer copies it to .env.
+All configuration is environment variables in `.env` at the repo root. Docker Compose loads it into each service (`env_file: .env`). `.env.example` documents the defaults, and the installer generates `.env` from it. After changing `.env`, apply it with `docker compose up -d`.
 
 ## Storage paths
 
-LOOM_MEDIA_PATH is the host folder mounted to /media in both containers, this is your file library. It defaults to ./data/media but you should point it at your real files. Loom reads it in place and only writes to its own .LoomTrash/ and .tmp-upload/ subfolders.
+| Variable | Default | Required | Purpose |
+|---|---|---|---|
+| `LOOM_MEDIA_PATH` | `./data/media` | Yes, point it at your real files | Host folder mounted at `/media` in both containers. This is your file library. Loom works on it in place and keeps its own working files only in the hidden `.LoomTrash/` and `.tmp-upload/` subfolders. |
+| `LOOM_CACHE_PATH` | `./data/cache` | Yes, pick a path with free space | Host folder mounted at `/cache`. Holds generated thumbnails, previews, video posters and converted video segments. Entirely derived and safe to delete; Loom regenerates it. **Must not be the media folder or inside it**: the installer refuses that, and the scanner won't change any file ownership if it detects it. |
 
-LOOM_CACHE_PATH is the host folder mounted to /cache, defaulting to ./data/cache. Pick somewhere with free space. It holds generated thumbnails, previews, and HLS segments, all derived and safe to delete, Loom rebuilds it on the next scan and generation pass.
+Both folders must be accessible to uid 1000. See [Installation → File permissions](INSTALLATION.md#file-permissions).
 
 ## Network
 
-LOOM_BIND is the host address the web app's port binds to, default 127.0.0.1. Leave it there unless Loom is the only thing on the host and you know what you're doing, normally you reach Loom through a reverse proxy (see [REVERSE-PROXY.md](REVERSE-PROXY.md)) rather than exposing the port directly. LOOM_PORT is the host port for the web app, default 8085.
+| Variable | Default | Required | Purpose |
+|---|---|---|---|
+| `LOOM_BIND` | `127.0.0.1` | No | Host address the web app's port is published on. Keep `127.0.0.1` and reach Loom through a reverse proxy or tunnel (see [REVERSE-PROXY.md](REVERSE-PROXY.md)). Use `0.0.0.0` only if you understand the exposure. |
+| `LOOM_PORT` | `8085` | No | Host port for the web app (the container listens on 3000). |
 
 ## Database
 
-POSTGRES_PASSWORD is the password for the loom PostgreSQL user, and it's required. The installer makes a random one, if you set it yourself make it long and random. DATABASE_URL is built automatically in compose.yml from POSTGRES_PASSWORD, you'd only set this yourself if running outside Docker Compose, against an external PostgreSQL for example.
+| Variable | Default | Required | Purpose |
+|---|---|---|---|
+| `POSTGRES_PASSWORD` | none | **Yes** | Password for the `loom` PostgreSQL user. The installer generates a random one. If you set it yourself, make it long and random. |
+| `DATABASE_URL` | built in `compose.yml` | No | Constructed automatically from `POSTGRES_PASSWORD`. Only set it yourself when running outside Docker Compose, e.g. against an external PostgreSQL. |
 
-## Login (better-auth)
+## Authentication and share links
 
-BETTER_AUTH_SECRET signs login sessions and is required. The installer generates a random 48-byte value. loom-web refuses to start if it's missing or still the example value, and logs a warning if it's shorter than 32 characters. Changing it logs everyone out. BETTER_AUTH_URL is the public URL Loom is served at, like https://loom.example.com. It's required in production: it's used to build auth callback URLs and the share links you hand out (`https://loom.example.com/s/…`). Set it to the address people outside your network will use. TRUSTED_ORIGINS is a comma-separated list of origins allowed to make logged-in requests, like https://loom.example.com,http://localhost:8085. It's recommended and defaults to empty. List every hostname and port you'll actually use.
+| Variable | Default | Required | Purpose |
+|---|---|---|---|
+| `BETTER_AUTH_SECRET` | none | **Yes** | Signs login sessions and protects share links. The installer generates a random 48-byte value. loom-web **refuses to start** if it's missing or still the example value, and logs a warning if it's shorter than 32 characters. Changing it signs everyone out. |
+| `BETTER_AUTH_URL` | `http://localhost:3000` | **Yes in production** | The public URL Loom is served at, e.g. `https://loom.example.com`. Used to build auth callback URLs and the share links you hand out (`https://loom.example.com/s/…`), so set it to the address people outside your network will use. |
+| `TRUSTED_ORIGINS` | empty | Recommended | Comma-separated list of origins allowed to make logged-in requests, e.g. `https://loom.example.com,http://localhost:8085`. List every hostname and port you'll actually use. |
 
-Share links are off until the Owner enables them in Settings, then Sharing. Links are encrypted with a key derived from BETTER_AUTH_SECRET, so changing the secret doesn't break existing links, but they can't be copied from the UI again.
+Related behavior that isn't configurable:
 
-Public sign-up is always disabled. The first account is created on the setup page, and after that the Owner adds users in Settings, then Users. Sign-in attempts are rate-limited to 10 per minute per IP address.
+- **Public sign-up is always disabled.** The first account is created on the setup page; after that the Owner adds users in Settings → Users.
+- **Sign-in is rate-limited** to 10 attempts per minute per IP address (password changes to 5 per minute). Pass `X-Forwarded-For` from your proxy so this applies per visitor.
+- **Sessions** last 30 days and are refreshed once a day while in use. Changing a user's password signs them out everywhere.
+- **Share links** are off until the Owner enables them in Settings → Sharing. Link tokens are stored encrypted with a key derived from `BETTER_AUTH_SECRET`; changing the secret doesn't break existing links, but they can no longer be copied again from the UI.
 
 ## Uploads and background work
 
-These all have sensible defaults. Leave them unset unless you have a reason.
+All optional, with sensible defaults. Leave them unset unless you have a reason.
 
-- LOOM_UPLOAD_CHUNK_MB (default 32, maximum 95) is the size of each upload chunk. Keep it below your proxy's request-size limit. Cloudflare's is 100 MB, and nginx's `client_max_body_size` must be at least this.
-- LOOM_MAX_UPLOAD_GB (default: no limit) caps the size of a single upload. Uploads are always refused if they would leave less than 256 MB free on the drive.
-- LOOM_WORKER_CONCURRENCY (default 2, maximum 8) sets how many files the scanner processes in parallel (thumbnails, previews, video posters). Raise it on a machine with more cores; lower it to 1 on a Raspberry Pi.
-- LOOM_SHARP_THREADS (default 2) sets how many threads the image library uses per job.
-- LOOM_MAX_TRANSCODES (default 2) sets how many videos can be converted for streaming at the same time. Each one uses roughly one CPU core.
-- LOOM_AUDIT_RETENTION_DAYS (default 180) sets how long audit log entries are kept.
+| Variable | Default | Limits | Purpose |
+|---|---|---|---|
+| `LOOM_UPLOAD_CHUNK_MB` | `32` | 1 to 95 | Size of each upload chunk. Must be below your reverse proxy's request size limit (Cloudflare's is 100 MB; nginx's `client_max_body_size` must be larger than this). |
+| `LOOM_MAX_UPLOAD_GB` | no limit | | Largest single file that can be uploaded. Independently, an upload is always refused if it would leave less than 256 MB free on the drive. |
+| `LOOM_WORKER_CONCURRENCY` | `2` | 1 to 8 | How many files the scanner processes in parallel (thumbnails, previews, video posters, metadata). Raise it on a machine with more cores; use `1` on a Raspberry Pi. |
+| `LOOM_SHARP_THREADS` | `2` | 1 to 4 | Threads the image library (sharp) uses per job. |
+| `LOOM_MAX_TRANSCODES` | `2` | at least 1 | How many videos can be converted for streaming at the same time. Each uses roughly one CPU core. |
+| `LOOM_AUDIT_RETENTION_DAYS` | `180` | at least 1 | How long audit log entries are kept. |
 
 ## Scripts
 
-- LOOM_KEEP_BACKUPS (default 10) is how many database backups scripts/backup-db.sh keeps in backups/. Older ones are deleted. Set it in .env, or for one run: `LOOM_KEEP_BACKUPS=30 ./scripts/backup-db.sh`.
-- ASSUME_YES=1 answers yes to the scripts' questions, the same as update.sh --yes. Use it carefully: restore-db.sh then restores without asking.
+These are read by the scripts in `scripts/`, not by the containers.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `LOOM_KEEP_BACKUPS` | `10` | How many database backups `backup-db.sh` keeps in `backups/`; older ones are deleted. Set it in `.env`, or for one run: `LOOM_KEEP_BACKUPS=30 ./scripts/backup-db.sh`. |
+| `ASSUME_YES` | unset | Set to `1` to answer yes to every question, the same as `update.sh --yes`. Use carefully: `restore-db.sh` then restores without asking. |
+| `LOOM_NEW_PASSWORD` | unset | For `reset-password.mjs` only: the new password, so the reset can run without a prompt. Normally you leave it unset and type the password when asked. |
 
 ## Next.js
 
-NODE_ENV defaults to production, it's the standard Node environment flag. NEXT_TELEMETRY_DISABLED defaults to 1 and turns off Next.js's anonymous telemetry.
+| Variable | Default | Purpose |
+|---|---|---|
+| `NODE_ENV` | `production` | Standard Node environment flag. Leave it as `production`. |
+| `NEXT_TELEMETRY_DISABLED` | `1` | Disables Next.js's anonymous telemetry. |
 
-## Advanced, container path overrides
+## Advanced: in-container path overrides
 
-These are read inside the containers and you normally wouldn't set them, they exist so the code isn't hardcoded to Docker's mount points, for anyone running Loom outside Docker Compose. MEDIA_ROOT defaults to /media inside the container, CACHE_ROOT defaults to /cache. Leave both unset in a normal Docker Compose setup.
+These are read inside the containers and exist for anyone running Loom outside Docker Compose. Leave them unset in a normal setup.
+
+| Variable | Default | Read by | Purpose |
+|---|---|---|---|
+| `CACHE_ROOT` | `/cache` | loom-web and loom-scanner | In-container path of the cache. |
+| `MEDIA_ROOT` | `/media` | loom-scanner only | In-container path of the media folder for the scanner. loom-web always uses `/media` (it's hardcoded in `web/lib/path-security.ts`), so if you change this, the web app must still see the media folder at `/media`. |
+
+The public demo build uses one more variable, `NEXT_PUBLIC_DEMO_MODE=1`, set only by `loom-demo/build.sh`. Never set it for a real install.

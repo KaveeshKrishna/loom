@@ -71,7 +71,7 @@ A big release: fast uploads, a new file browser, editing, share links, and a saf
 ### Share links
 
 - Share a file or folder with anyone, no account needed. Optional password, expiry and view-only mode. Revoke at any time.
-- Off by default; the Owner decides whether Family users can share.
+- Off by default; the Owner turns sharing on or off for everyone. Users can only share items they can fully access.
 - Links stop working if the item is trashed, the creator loses access, or sharing is turned off.
 
 ### Video
