@@ -7,7 +7,9 @@ test("Devices: pairing code as a QR code, then the app shows up; rename and remo
   test.skip(info.project.name !== "desktop" && info.project.name !== "iphone", "layout covered by the smoke test");
   await page.goto("/devices");
   await expect(page.getByRole("heading", { name: "Devices", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Loom for Windows/ })).toHaveAttribute("href", /releases/);
+  // Direct downloads of the newest apps (fixed names in the rolling "updates" release).
+  await expect(page.getByRole("link", { name: /Loom for Windows/ })).toHaveAttribute("href", /\/releases\/download\/updates\/Loom-Windows-Setup\.exe$/);
+  await expect(page.getByRole("link", { name: /Loom for Android/ })).toHaveAttribute("href", /\/releases\/download\/updates\/Loom-Android\.apk$/);
   await page.getByRole("button", { name: "Show pairing code" }).click();
   await expect(page.getByRole("img", { name: "Pairing code for the Loom app" })).toBeVisible();
   const code = (await page.getByText(/^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/).textContent())!.trim();

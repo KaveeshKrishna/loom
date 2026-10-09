@@ -31,9 +31,11 @@ function isUniqueViolation(err: unknown): boolean {
 /**
  * Make sure a DIRECTORY node exists for `relDir` and each of its ancestors.
  * Missing directories on disk are skipped (they can't be indexed).
+ * Returns the ones it created.
  */
-export async function ensureDirectoryNodes(relDir: string, tx: Tx = prisma): Promise<void> {
-  if (!relDir) return;
+export async function ensureDirectoryNodes(relDir: string, tx: Tx = prisma): Promise<string[]> {
+  const created: string[] = [];
+  if (!relDir) return created;
   const segments = relDir.split("/");
   const wanted = segments.map((_, i) => segments.slice(0, i + 1).join("/"));
   const existing = await tx.fileNode.findMany({
@@ -61,10 +63,12 @@ export async function ensureDirectoryNodes(relDir: string, tx: Tx = prisma): Pro
           isVisible: true,
         },
       });
+      created.push(rel);
     } catch (err) {
       if (!isUniqueViolation(err)) throw err; // someone else created it — fine
     }
   }
+  return created;
 }
 
 /**

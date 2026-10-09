@@ -3,6 +3,9 @@
  * be paused, resumed and cancelled, and the page copes with Loom going away
  * (a "reconnecting" bar) and coming back updated (it reloads itself).
  */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";
 import { dropFiles } from "./helpers";
 
@@ -43,6 +46,25 @@ test("dropped files are only uploaded after confirming", async ({ page }) => {
   await page.getByRole("dialog").getByRole("button", { name: "Upload" }).click();
   await expect(page.getByText(/2 uploads complete/)).toBeVisible({ timeout: 15_000 });
   expect(started).toHaveLength(2);
+});
+
+test("an uploaded folder appears in the open folder without reloading", async ({ page }) => {
+  const name = `Trip-${Date.now()}`;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "loom-folder-"));
+  fs.mkdirSync(path.join(root, name, "day one"), { recursive: true });
+  fs.writeFileSync(path.join(root, name, "day one", "notes.txt"), "beach");
+  fs.writeFileSync(path.join(root, name, "plan.txt"), "go");
+  await page.goto("/files/Documents");
+  await expect(page.getByText("Notes.txt")).toBeVisible();
+  let reloads = 0;
+  page.on("framenavigated", (f) => {
+    if (f === page.mainFrame()) reloads++;
+  });
+  await page.locator('input[type="file"][webkitdirectory]').setInputFiles(path.join(root, name));
+  await expect(page.getByText(/2 uploads complete/)).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(`[aria-label="${name}"]`).first()).toBeVisible({ timeout: 5_000 });
+  expect(reloads, "the page wasn't reloaded").toBe(0);
+  fs.rmSync(root, { recursive: true, force: true });
 });
 
 test("uploads can be paused, resumed and cancelled", async ({ page }) => {

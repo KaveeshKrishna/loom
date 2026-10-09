@@ -180,27 +180,35 @@ export function useChangeReason(reason: string, onEvent: (nodeIds: string[]) => 
 /**
  * Call `onChange` (debounced) when `dir` — or anything, if dir is null —
  * changes. Stable across renders; the latest callback is always used.
+ * A steady stream of changes (a long upload into this folder) still calls
+ * it at least every `maxWaitMs`.
  */
-export function useDirChanges(dir: string | null, onChange: (nodeIds: string[]) => void, debounceMs = 300) {
+export function useDirChanges(dir: string | null, onChange: (nodeIds: string[]) => void, debounceMs = 300, maxWaitMs = 1500) {
   const cb = useRef(onChange);
   cb.current = onChange;
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let pendingIds: string[] = [];
+    let firstPending = 0;
+    const fire = () => {
+      timer = null;
+      firstPending = 0;
+      const ids = pendingIds;
+      pendingIds = [];
+      cb.current(ids);
+    };
     const l: Listener = (dirs, nodeIds) => {
       if (dir !== null && !dirs.includes("*") && !dirs.includes(dir)) return;
       pendingIds.push(...nodeIds);
+      const now = Date.now();
+      if (!firstPending) firstPending = now;
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        const ids = pendingIds;
-        pendingIds = [];
-        cb.current(ids);
-      }, debounceMs);
+      timer = setTimeout(fire, Math.max(0, Math.min(debounceMs, firstPending + maxWaitMs - now)));
     };
     listeners.add(l);
     return () => {
       listeners.delete(l);
       if (timer) clearTimeout(timer);
     };
-  }, [dir, debounceMs]);
+  }, [dir, debounceMs, maxWaitMs]);
 }

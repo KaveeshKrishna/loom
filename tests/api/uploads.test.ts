@@ -363,15 +363,12 @@ test("removing an app cancels its unfinished uploads", async () => {
   assert.equal((await sql(`SELECT 1 FROM upload_sessions WHERE id = $1`, [s.id])).length, 0);
 });
 
-test("chunks: an app's upload is announced live to open browsers, like a browser upload", async () => {
-  const o = await owner();
-  const { app } = await sharedApp(o);
-  const dir = await freshFolder(o);
-  // The browser's live-update stream (what refreshes the folder on screen).
+/** The browser's live-update stream (what refreshes the folder on screen). */
+async function listenToChanges(c: Client) {
   const ac = new AbortController();
-  const res = await o.raw("GET", "/api/events", { headers: { accept: "text/event-stream" } });
+  const res = await c.raw("GET", "/api/events", { headers: { accept: "text/event-stream" } });
   assert.equal(res.status, 200);
-  const events: string[] = [];
+  const chunks: string[] = [];
   const reading = (async () => {
     const reader = res.body!.getReader();
     const dec = new TextDecoder();
@@ -380,24 +377,61 @@ test("chunks: an app's upload is announced live to open browsers, like a browser
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
-        events.push(dec.decode(value));
+        chunks.push(dec.decode(value));
       }
     } catch {
       /* cancelled */
     }
   })();
   await new Promise((r) => setTimeout(r, 300));
+  const changes = () =>
+    chunks
+      .join("")
+      .split("\n")
+      .filter((l) => l.startsWith("data:"))
+      .map((l) => JSON.parse(l.slice(5)))
+      .filter((e) => e.type === "changed") as { dirs: string[]; nodeIds?: string[] }[];
+  return {
+    /** The first change naming `dir`, waiting up to 10 s for it. */
+    async changeOf(dir: string) {
+      const until = Date.now() + 10_000;
+      while (!changes().some((e) => e.dirs?.includes(dir)) && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
+      return changes().find((e) => e.dirs?.includes(dir));
+    },
+    async stop() {
+      ac.abort();
+      await reading;
+    },
+    raw: () => chunks.join(""),
+  };
+}
+
+test("chunks: an app's upload is announced live to open browsers, like a browser upload", async () => {
+  const o = await owner();
+  const { app } = await sharedApp(o);
+  const dir = await freshFolder(o);
+  const live = await listenToChanges(o);
   await chunkUpload(app, dir, "from-the-app.bin", randomBytes(MiB + 5));
-  const until = Date.now() + 10_000;
-  while (!events.join("").includes(`"${dir}"`) && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
-  ac.abort();
-  await reading;
-  const changed = events
-    .join("")
-    .split("\n")
-    .filter((l) => l.startsWith("data:"))
-    .map((l) => JSON.parse(l.slice(5)))
-    .find((e) => e.type === "changed" && e.dirs?.includes(dir));
-  assert.ok(changed, `no change event for ${dir}: ${events.join("")}`);
+  const changed = await live.changeOf(dir);
+  await live.stop();
+  assert.ok(changed, `no change event for ${dir}: ${live.raw()}`);
   assert.ok(changed.nodeIds?.length >= 1, "names the new file");
+});
+
+test("a folder created by an upload is announced to the folder it appears in", async () => {
+  const o = await owner();
+  const { app } = await sharedApp(o);
+  const dir = await freshFolder(o);
+  const live = await listenToChanges(o);
+  // Uploading the folder Trip (with a subfolder) into dir, from the app and from a browser.
+  await chunkUpload(app, dir, "Trip/day one/photo.bin", randomBytes(1000));
+  await streamUpload(o, dir, "Notes/list.txt", Buffer.from("milk"));
+  const forDir = await live.changeOf(dir);
+  const forTrip = await live.changeOf(`${dir}/Trip`);
+  await live.stop();
+  assert.ok(forDir, `the listing of ${dir} wasn't told about Trip and Notes: ${live.raw()}`);
+  assert.ok(forTrip, `the listing of Trip wasn't told about "day one": ${live.raw()}`);
+  const listed = await o.get(`/api/files?path=${encodeURIComponent(dir)}`);
+  const names = (listed.body.children as { name: string }[]).map((n: { name: string }) => n.name).sort();
+  assert.deepEqual(names, ["Notes", "Trip"]);
 });

@@ -598,8 +598,10 @@ async function finalizeOnce(user: SessionUser, session: UploadSession, onConflic
   const finalRel = joinRel(dirRel, finalName);
   let nodeId: string | null = null;
   let processing = false;
+  // Folders this upload brought into being: their parents' listings must hear of them.
+  let newDirs: string[] = [];
   try {
-    await ensureDirectoryNodes(dirRel);
+    newDirs = await ensureDirectoryNodes(dirRel);
     const node = await upsertFileNodeFromDisk(finalRel);
     nodeId = node.id;
     processing = await queueProcessFile(node, user.id);
@@ -618,7 +620,7 @@ async function finalizeOnce(user: SessionUser, session: UploadSession, onConflic
     console.error("[upload] indexing after upload failed for", finalRel, err);
   }
   if (processing) await notifyScanner();
-  await publishChange([dirRel], nodeId ? [nodeId] : undefined);
+  await publishChange([dirRel, ...newDirs.map(parentOf)], nodeId ? [nodeId] : undefined);
 
   return { success: true, path: finalRel, name: finalName, renamed: finalName !== wanted, replaced, nodeId, processing };
 }

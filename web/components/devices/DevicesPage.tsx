@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Monitor, Smartphone, Laptop, MonitorSmartphone, Loader2, QrCode as QrIcon, Pencil, Trash2, ArrowUpRight, RefreshCw } from "lucide-react";
+import { Monitor, Smartphone, Laptop, MonitorSmartphone, Loader2, QrCode as QrIcon, Pencil, Trash2, ArrowUpRight, RefreshCw, Download } from "lucide-react";
 import { useNav } from "@/components/layout/TopBarContext";
 import { api } from "@/lib/client/api";
 import { toast } from "@/components/ui/Toaster";
@@ -17,9 +17,13 @@ import { dialogs } from "@/components/ui/Dialog";
 import { formatDate, formatRelative, cn } from "@/lib/utils";
 import { QrCode } from "./QrCode";
 
+// The release workflows keep the newest app of each kind in the rolling
+// "updates" release under these fixed names, so the links never go stale.
+const RELEASES = "https://github.com/KaveeshKrishna/loom/releases";
 export const APP_DOWNLOADS = {
-  windows: "https://github.com/KaveeshKrishna/loom/releases?q=desktop&expanded=true",
-  android: "https://github.com/KaveeshKrishna/loom/releases?q=android&expanded=true",
+  windows: `${RELEASES}/download/updates/Loom-Windows-Setup.exe`,
+  android: `${RELEASES}/download/updates/Loom-Android.apk`,
+  notes: RELEASES,
 };
 
 export interface DeviceRow {
@@ -113,6 +117,11 @@ export function DevicesPage() {
           detail="Phones and tablets · Android 8 and later"
           href={APP_DOWNLOADS.android}
         />
+        <p className="sm:col-span-2 text-xs text-[hsl(var(--muted-foreground))]">
+          <a href={APP_DOWNLOADS.notes} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 hover:text-[hsl(var(--foreground))] hover:underline">
+            What&apos;s new and earlier versions <ArrowUpRight size={12} />
+          </a>
+        </p>
       </section>
 
       <PairingCard />
@@ -150,8 +159,6 @@ function AppCard({ icon, title, detail, href }: { icon: React.ReactNode; title: 
   return (
     <a
       href={href}
-      target="_blank"
-      rel="noopener noreferrer"
       className="group min-w-0 flex items-center gap-3 border rounded-xl px-4 py-3.5 hover:bg-[hsl(var(--accent))] transition-colors"
     >
       <span className="w-10 h-10 rounded-lg bg-[hsl(var(--primary)/0.1)] text-[hsl(var(--primary))] flex items-center justify-center shrink-0">
@@ -161,7 +168,7 @@ function AppCard({ icon, title, detail, href }: { icon: React.ReactNode; title: 
         <span className="block text-sm font-medium">{title}</span>
         <span className="block text-xs text-[hsl(var(--muted-foreground))] truncate">{detail}</span>
       </span>
-      <ArrowUpRight size={16} className="text-[hsl(var(--muted-foreground))] group-hover:text-[hsl(var(--foreground))] shrink-0" />
+      <Download size={16} aria-label="Download" className="text-[hsl(var(--muted-foreground))] group-hover:text-[hsl(var(--foreground))] shrink-0" />
     </a>
   );
 }
