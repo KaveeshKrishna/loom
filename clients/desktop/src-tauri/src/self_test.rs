@@ -95,7 +95,11 @@ impl Log {
     fn add(&mut self, s: impl Into<String>) {
         self.lines.push(format!("{:>6} ms  {}", self.started.elapsed().as_millis(), s.into()));
     }
-    fn finish(self, handle: &AppHandle, report: &PathBuf, code: i32) {
+    /// Write the report (its last line is a bare PASS when it passed, which CI looks for) and exit.
+    fn finish(mut self, handle: &AppHandle, report: &PathBuf, code: i32) {
+        if code == 0 {
+            self.lines.push("PASS".into());
+        }
         let text = self.lines.join("\n") + "\n";
         eprint!("{text}");
         if let Err(e) = std::fs::write(report, &text) {
@@ -199,10 +203,6 @@ async fn bridge_test(handle: AppHandle, window: WebviewWindow, mut rx: tokio::sy
             }
         }
     };
-    // The report's last line is what CI looks for.
-    if code == 0 {
-        log.lines.push("PASS".into());
-    }
     log.finish(&handle, &report, code);
 }
 
@@ -266,8 +266,7 @@ async fn update_test(a: crate::AppRef, report: PathBuf) {
         return log.finish(&handle, &report, 1);
     }
     log.add("installing (Loom exits now; the installer starts the new version)");
-    log.add("PASS");
-    let text = log.lines.join("\n") + "\n";
+    let text = log.lines.join("\n") + "\nPASS\n";
     let _ = std::fs::write(&report, &text);
     if let Err(e) = updates::install(&a).await {
         log.add(format!("FAIL: {e}"));
