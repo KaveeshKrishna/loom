@@ -15,7 +15,7 @@ COMPOSE="$(compose_cmd)"
 FILE="${1:-}"
 { [ -n "$FILE" ] && [ -f "$FILE" ]; } || fail "Usage: $0 backups/loom-<timestamp>.sql.gz"
 gzip -t "$FILE" 2>/dev/null || fail "$FILE is not a valid .sql.gz backup."
-gzip -dc "$FILE" | tail -n 20 | grep -q "PostgreSQL database dump complete" || fail "$FILE looks incomplete."
+grep -q "PostgreSQL database dump complete" <<<"$(gzip -dc "$FILE" | tail -n 20)" || fail "$FILE looks incomplete."
 
 bold "Restore database from $FILE"
 warn "This replaces everything in Loom's database with the backup."

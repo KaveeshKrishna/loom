@@ -30,7 +30,7 @@ $COMPOSE exec -T postgres pg_dump -U loom -d loom --no-owner | gzip -c > "$OUT.p
 
 # Verify: valid gzip, non-trivial size, and pg_dump's completion marker.
 gzip -t "$OUT.partial" || { rm -f "$OUT.partial"; fail "Backup is not a valid gzip file."; }
-if ! gzip -dc "$OUT.partial" | tail -n 20 | grep -q "PostgreSQL database dump complete"; then
+if ! grep -q "PostgreSQL database dump complete" <<<"$(gzip -dc "$OUT.partial" | tail -n 20)"; then
   rm -f "$OUT.partial"
   fail "Backup looks incomplete (no 'dump complete' marker). Nothing was changed."
 fi

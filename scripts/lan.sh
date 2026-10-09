@@ -65,7 +65,9 @@ cmd_enable() {
   [[ "$host" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || fail "--host must be an IPv4 address on your local network (got: $host)"
   port="${port:-$(env_get LOOM_LAN_PORT)}"
   port="${port:-8443}"
-  [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || fail "--port must be a port number"
+  if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+    fail "--port must be a port number"
+  fi
 
   bold "LAN access for the Loom apps"
   info "Address: https://$host:$port"
@@ -132,7 +134,7 @@ cmd_status() {
   port="$(env_get LOOM_LAN_PORT)"
   port="${port:-8443}"
   pki="$(pki_path)"
-  if ! env_get COMPOSE_PROFILES | tr ',' '\n' | grep -qx lan; then
+  if ! grep -qx lan <<<"$(env_get COMPOSE_PROFILES | tr ',' '\n')"; then
     info "LAN access is off. Turn it on with: $0 enable"
     return 0
   fi

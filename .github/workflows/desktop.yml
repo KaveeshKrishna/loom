@@ -71,4 +71,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" dist/*.exe --repo "$GITHUB_REPOSITORY" --title "Loom for Windows ${TAG#desktop-v}" --notes "Download the setup file below and run it. Windows may warn about an unknown publisher the first time (the app isn't code-signed): choose More info, then Run anyway."
+        run: |
+          notes="Download the setup file below and run it. Windows may warn about an unknown publisher the first time (the app isn't code-signed): choose More info, then Run anyway."
+          gh release create "$TAG" dist/*.exe --repo "$GITHUB_REPOSITORY" --title "Loom for Windows ${TAG#desktop-v}" --notes "$notes"
