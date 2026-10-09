@@ -133,8 +133,11 @@ class AppTest {
             throw e
         }
 
+        // An emulator image with a WebView too old for Loom gets the "update it" screen instead.
+        val oldWebView = WebViewCheck.tooOld(instr.targetContext)
+        if (oldWebView != null) find("Update Android System WebView")
         // Loom's own page, signed in through the device token, showing the test folder.
-        val shown = device.wait(Until.hasObject(By.textContains(folder)), 30_000)
+        val shown = oldWebView != null || device.wait(Until.hasObject(By.textContains(folder)), 30_000)
         shot("4-loom")
         device.dumpWindowHierarchy(File(instr.targetContext.getExternalFilesDir(null), "loom-page.xml"))
         device.executeShellCommand("cp ${instr.targetContext.getExternalFilesDir(null)}/loom-page.xml /data/local/tmp/loom-screens/api${Build.VERSION.SDK_INT}-$kind-page.xml")

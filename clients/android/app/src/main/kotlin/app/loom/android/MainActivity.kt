@@ -300,6 +300,10 @@ class MainActivity : ComponentActivity(), LoomWeb.Events {
             LaunchedEffect(Unit) { if (app.startEngine() == null) signedIn = false }
             return
         }
+        WebViewCheck.tooOld(this)?.let { version ->
+            app.loom.android.ui.OldWebView(version)
+            return
+        }
         val w = web()
         val snapshot by e.snapshot.collectAsState()
         val loading by w.loading.collectAsState()

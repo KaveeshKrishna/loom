@@ -72,6 +72,7 @@ class LoomWeb(
             userAgentString = "$userAgentString LoomAndroid/${BuildConfig.VERSION_NAME}"
         }
         view.isVerticalScrollBarEnabled = false
+        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         bridge.install()
         view.webViewClient = Client()
         view.webChromeClient = Chrome()
@@ -173,6 +174,7 @@ class LoomWeb(
 
         override fun onPageFinished(view: WebView, url: String) {
             android.util.Log.i("LoomPage", "loaded $url")
+            if (BuildConfig.DEBUG) view.evaluateJavascript(DIAGNOSE, null)
             loading.value = false
             if (url.startsWith(server) && !url.contains("/login") && !pairing) lastUrl = url
         }
@@ -208,6 +210,16 @@ class LoomWeb(
     }
 
     private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
+
+    companion object {
+        /** Debug builds: what the page managed to load, in the log a few seconds later. */
+        private const val DIAGNOSE = """setTimeout(() => console.log("DIAG " + JSON.stringify({
+  url: location.pathname, ready: document.readyState, text: document.body ? document.body.innerText.length : -1,
+  size: [innerWidth, innerHeight, document.documentElement.scrollHeight, scrollY],
+  scripts: performance.getEntriesByType("resource").filter((r) => r.initiatorType === "script" || r.initiatorType === "fetch")
+    .map((r) => r.name.split("/").pop().slice(0, 40) + ":" + Math.round(r.duration) + "ms:" + r.transferSize).slice(0, 40),
+})), 8000)"""
+    }
 
     fun exitFullscreen(): Boolean {
         val cb = fullscreenCallback ?: return false

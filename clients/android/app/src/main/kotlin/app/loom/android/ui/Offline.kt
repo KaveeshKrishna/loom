@@ -58,3 +58,33 @@ fun Offline(server: String, onReload: () -> Unit, onTransfers: () -> Unit) {
         }
     }
 }
+
+/** Android System WebView is too old to show Loom (seen on Android 8-10 devices that never updated it). */
+@Composable
+fun OldWebView(version: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+        Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+            Column(Modifier.widthIn(max = 380.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                LoomMark(48.dp)
+                Spacer(Modifier.height(20.dp))
+                Text("Update Android System WebView", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Loom shows its pages with Android System WebView, and the one on this device ($version) is too old. Update it from the Play Store, then open Loom again. Transfers already running continue meanwhile.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(24.dp))
+                Button(onClick = {
+                    val id = "com.google.android.webview"
+                    val market = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("market://details?id=$id"))
+                    runCatching { context.startActivity(market) }.onFailure {
+                        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://play.google.com/store/apps/details?id=$id")))
+                    }
+                }) { Text("Open the Play Store") }
+            }
+        }
+    }
+}
