@@ -13,7 +13,7 @@
     "exif-reader": "2.0.3",
     "mime-types": "2.1.35",
     "pg": "8.23.0",
-    "sharp": "0.35.4"
+    "sharp": "0.35.5"
   },
   "devDependencies": {
     "@types/mime-types": "2.1.4",
