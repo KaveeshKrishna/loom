@@ -48,7 +48,7 @@ object KeepAlive {
                 val info = JobInfo.Builder(JOB_ID, ComponentName(c, TransferJob::class.java))
                     .setUserInitiated(true)
                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-                    .setEstimatedNetworkBytes(JobInfo.NETWORK_BYTES_UNKNOWN, JobInfo.NETWORK_BYTES_UNKNOWN)
+                    .setEstimatedNetworkBytes(JobInfo.NETWORK_BYTES_UNKNOWN.toLong(), JobInfo.NETWORK_BYTES_UNKNOWN.toLong())
                     .build()
                 if (runCatching { js.schedule(info) }.getOrDefault(JobScheduler.RESULT_FAILURE) == JobScheduler.RESULT_SUCCESS) {
                     holding = true
