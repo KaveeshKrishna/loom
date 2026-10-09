@@ -50,7 +50,7 @@
     "@types/react-dom": "19.1.6",
     "eslint": "9.29.0",
     "eslint-config-next": "15.5.26",
-    "postcss": "8.5.6",
+    "postcss": "8.5.29",
     "prisma": "^6.11.1",
     "tailwindcss": "4.1.11"
   }
