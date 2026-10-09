@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Monitor, Smartphone, Laptop, Check, X, Loader2 } from "lucide-react";
 import { api } from "@/lib/client/api";
 import { formatRelative } from "@/lib/utils";
+import { LoomLogo } from "@/components/ui/LoomLogo";
 
 interface Request {
   id: string;
@@ -51,9 +52,7 @@ export function PairApprove({ request, userName }: { request: Request | null; us
     <div className="min-h-svh bg-[hsl(var(--background))] flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-6">
-          <div className="w-12 h-12 rounded-2xl bg-[hsl(var(--primary))] flex items-center justify-center mb-4 shadow-md">
-            <span className="text-white text-xl font-bold">L</span>
-          </div>
+          <LoomLogo size={48} className="mb-4 drop-shadow-sm" />
           <h1 className="text-xl font-semibold text-center">
             {state === "pending" ? "Allow this app?" : state === "approved" ? "App connected" : state === "denied" ? "Request declined" : "Request not found"}
           </h1>

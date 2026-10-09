@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Download, Folder, Lock, Loader2, ChevronRight, X, AlertTriangle, Home } from "lucide-react";
 import { formatBytes, formatDate, getFileCategory, cn } from "@/lib/utils";
 import { FileIcon } from "@/components/files/FileIcon";
+import { LoomLogo } from "@/components/ui/LoomLogo";
 
 interface Info {
   name: string;
@@ -71,9 +72,7 @@ export function SharePage({ token }: { token: string }) {
   return (
     <div className="min-h-svh flex flex-col bg-[hsl(var(--background))]">
       <header className="h-14 border-b flex items-center gap-3 px-4 sm:px-6">
-        <div className="w-7 h-7 rounded-lg bg-[hsl(var(--primary))] flex items-center justify-center shrink-0">
-          <span className="text-white text-sm font-bold">L</span>
-        </div>
+        <LoomLogo size={28} className="shrink-0" />
         <p className="text-sm font-medium truncate flex-1">{info?.name ?? "Shared with you"}</p>
         {info && !info.locked && info.allowDownload && (
           <a

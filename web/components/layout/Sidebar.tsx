@@ -11,6 +11,7 @@ import { LOOM_DRAG_TYPE } from "@/lib/client/drop";
 import { moveItems, copyItems, trashItems } from "@/components/files/actions";
 import { StorageMeter } from "./StorageMeter";
 import { hasNative, nativeApp, openNativeWindow, useNativeTransfers } from "@/lib/client/native";
+import { LoomLogo } from "@/components/ui/LoomLogo";
 
 const navItems = [
   { href: "/files", label: "All Files", icon: FolderOpen },
@@ -191,9 +192,7 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, colla
     >
       <div className={cn("flex items-center h-14 border-b border-[hsl(var(--sidebar-border))]", collapsed ? "justify-center px-0" : "justify-between px-5")}>
         <Link href="/files" className="flex items-center gap-2.5" onClick={onClose}>
-          <div className="w-7 h-7 rounded-lg bg-[hsl(var(--primary))] flex items-center justify-center shrink-0">
-            <span className="text-white text-sm font-bold">L</span>
-          </div>
+          <LoomLogo size={28} className="shrink-0" />
           {!collapsed && <span className="text-sm font-semibold tracking-tight text-[hsl(var(--foreground))]">Loom</span>}
         </Link>
         {isMobile && (

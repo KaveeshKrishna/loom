@@ -173,15 +173,26 @@ export function Card({ title, children }: { title?: string; children: ReactNode 
   );
 }
 
-/** Loom's mark, as in the web app. */
+/** Loom's mark, as in the web app (brand/mark.py). */
+const MARK: [number, number, number, number, boolean][] = [
+  [374, 214, 276, 136, false],
+  [214, 444, 206, 136, false],
+  [604, 444, 206, 136, false],
+  [374, 674, 276, 136, false],
+  [214, 214, 136, 206, true],
+  [214, 604, 136, 206, true],
+  [444, 374, 136, 276, true],
+  [674, 214, 136, 206, true],
+  [674, 604, 136, 206, true],
+];
+
 export function LoomMark({ size = 40 }: { size?: number }) {
   return (
-    <div
-      className="flex items-center justify-center rounded-[22%] bg-[hsl(var(--primary))] text-white font-bold shadow-sm"
-      style={{ width: size, height: size, fontSize: size * 0.45 }}
-      aria-hidden
-    >
-      L
-    </div>
+    <svg width={size} height={size} viewBox="0 0 1024 1024" className="drop-shadow-sm" aria-hidden focusable="false">
+      <rect width="1024" height="1024" rx="230" fill="#1A5FF0" />
+      {MARK.map(([x, y, w, h, warp]) => (
+        <rect key={`${x}-${y}`} x={x} y={y} width={w} height={h} rx="12" fill={warp ? "#B5CBFF" : "#FFFFFF"} />
+      ))}
+    </svg>
   );
 }

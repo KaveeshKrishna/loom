@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Eye, EyeOff } from "lucide-react";
 import { signIn } from "@/lib/auth-client";
+import { LoomLogo } from "@/components/ui/LoomLogo";
 
 export function SetupForm() {
   const router = useRouter();
@@ -61,9 +62,7 @@ export function SetupForm() {
     <div className="min-h-svh bg-[hsl(var(--background))] flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
-          <div className="w-12 h-12 rounded-2xl bg-[hsl(var(--primary))] flex items-center justify-center mb-4 shadow-md">
-            <span className="text-white text-xl font-bold">L</span>
-          </div>
+          <LoomLogo size={48} className="mb-4 drop-shadow-sm" />
           <h1 className="text-xl font-semibold">Welcome to Loom</h1>
           <p className="text-sm text-[hsl(var(--muted-foreground))] mt-1 text-center">
             Create the owner account to finish setting up your instance.

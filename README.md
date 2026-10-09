@@ -1,3 +1,5 @@
+<p align="center"><img src="brand/loom.svg" width="96" height="96" alt=""></p>
+
 # Loom
 
 Loom is a self-hosted file manager for your own server or NAS. Point it at a folder of files you already have (photos, videos, music, documents, anything) and it gives you a fast web app to browse, search, stream, share, and organize them from anywhere.
