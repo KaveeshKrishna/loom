@@ -117,10 +117,12 @@ class LoomWeb(
         scope.launch {
             try {
                 val path = e.api.webLogin()
+                android.util.Log.i("LoomPage", "web-login link for $next")
                 val sep = if (path.contains('?')) '&' else '?'
                 val nextPath = Uri.parse(next).let { it.encodedPath + (it.encodedQuery?.let { q -> "?$q" } ?: "") }
                 view.loadUrl("$server$path${sep}next=${Uri.encode(nextPath)}")
             } catch (ex: Exception) {
+                android.util.Log.w("LoomPage", "web-login failed: $ex")
                 failed(next)
             }
         }
@@ -155,6 +157,7 @@ class LoomWeb(
     private inner class Client : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url.toString()
+            if (request.isForMainFrame) android.util.Log.i("LoomPage", "navigate ${if (request.isRedirect) "(redirect) " else ""}${url.substringBefore("?t=")}")
             if (url.startsWith(server)) return false
             if (url.startsWith("loom://")) return true
             openOutside(url)
@@ -163,6 +166,7 @@ class LoomWeb(
 
         override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
             loading.value = true
+            android.util.Log.i("LoomPage", "start ${url.substringBefore("?t=")}")
             bridge.pageStarted()
             // Loom asks to sign in: the device token does that.
             val path = Uri.parse(url).path.orEmpty()
