@@ -25,7 +25,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
     tauri::generate_handler![
         app_state, check_server, start_pairing, cancel_pairing, sign_out, snapshot, batches, items, conflicts, decide, pause, resume, cancel, retry,
         remove_batch, clear_finished, pick_upload, list_folder, create_folder, pending_upload, confirm_upload, cancel_pending_upload,
-        recent_destinations, settings, set_settings, choose_download_dir, open_main, reveal, open_logs, close_window
+        recent_destinations, settings, set_settings, choose_download_dir, open_main, open_transfers, reveal, open_logs, close_window
     ]
 }
 
@@ -458,6 +458,11 @@ fn set_settings(a: State<AppRef>, settings: AppSettings) {
 #[tauri::command]
 fn open_main(a: State<AppRef>, path: Option<String>) {
     crate::show_main(a.inner(), path);
+}
+
+#[tauri::command]
+fn open_transfers(a: State<AppRef>) {
+    crate::show_transfers(a.inner(), false);
 }
 
 #[tauri::command]

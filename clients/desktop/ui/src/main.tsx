@@ -1,6 +1,6 @@
 /**
  * One bundle, several windows: the window's address picks the screen
- * (#/transfers, #/settings, #/onboarding, #/destination).
+ * (#/transfers, #/settings, #/onboarding, #/destination, #/offline).
  */
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -8,11 +8,13 @@ import "./styles.css";
 import { TransfersWindow } from "./views/Transfers";
 import { Onboarding } from "./views/Onboarding";
 import { Destination } from "./views/Destination";
+import { Offline } from "./views/Offline";
 
 function Screen() {
   const route = location.hash.replace(/^#\/?/, "").split("?")[0];
   if (route.startsWith("onboarding")) return <Onboarding />;
   if (route.startsWith("destination")) return <Destination />;
+  if (route.startsWith("offline")) return <Offline />;
   return <TransfersWindow />;
 }
 

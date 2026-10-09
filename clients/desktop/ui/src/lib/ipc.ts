@@ -181,6 +181,7 @@ export const api = {
   setSettings: (settings: AppSettings) => invoke<void>("set_settings", { settings }),
   chooseDownloadDir: () => invoke<string | null>("choose_download_dir"),
   openMain: (path: string | null) => invoke<void>("open_main", { path }),
+  openTransfers: () => invoke<void>("open_transfers"),
   reveal: (path: string) => invoke<void>("reveal", { path }),
   openLogs: () => invoke<void>("open_logs"),
   closeWindow: () => invoke<void>("close_window"),

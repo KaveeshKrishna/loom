@@ -13,6 +13,7 @@ const shots = [
   ["settings", "?scenario=busy#/settings", 1000, 760],
   ["onboarding", "?scenario=onboarding#/onboarding", 460, 620],
   ["destination", "?scenario=busy#/destination", 560, 640],
+  ["offline", "?scenario=busy#/offline?server=https%3A%2F%2Floom.example.com", 1000, 660],
 ];
 
 fs.mkdirSync("ui-tests/out", { recursive: true });

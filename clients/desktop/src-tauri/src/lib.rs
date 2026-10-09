@@ -333,7 +333,8 @@ pub fn show_destination(a: &AppRef) {
 
 /// Show Loom itself, signed in. `path` = a folder to open.
 pub fn show_main(a: &AppRef, path: Option<String>) {
-    if let Some(w) = a.handle.get_webview_window("main") {
+    let offline = a.handle.get_webview_window("main").and_then(|w| w.url().ok()).map(|u| is_app_page(&u)).unwrap_or(false);
+    if let Some(w) = a.handle.get_webview_window("main").filter(|_| !offline) {
         let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();
@@ -353,6 +354,11 @@ pub fn show_main(a: &AppRef, path: Option<String>) {
         let url = match a.engine().map(|e| e.api().clone()) {
             Some(api) => match api.web_login().await {
                 Ok(p) => format!("{server}{p}&next={}", url::form_urlencoded::byte_serialize(next.as_bytes()).collect::<String>()),
+                Err(loom_engine::Error::Transient(e)) => {
+                    tracing::warn!("Loom isn't reachable ({e})");
+                    show_offline(&a, &server);
+                    return;
+                }
                 Err(e) => {
                     tracing::warn!("web sign-in link failed ({e}); opening Loom directly");
                     format!("{server}{next}")
@@ -364,9 +370,39 @@ pub fn show_main(a: &AppRef, path: Option<String>) {
     });
 }
 
+/// One of the app's own pages (tauri://localhost, or http://tauri.localhost on Windows).
+fn is_app_page(u: &url::Url) -> bool {
+    u.scheme() == "tauri" || u.host_str() == Some("tauri.localhost")
+}
+
+/// "Can't reach Loom" in the main window (an app page; Try again calls show_main).
+fn show_offline(a: &AppRef, server: &str) {
+    let route = format!("index.html#/offline?server={}", url::form_urlencoded::byte_serialize(server.as_bytes()).collect::<String>());
+    if let Some(w) = a.handle.get_webview_window("main") {
+        // An existing window may be on Loom (and fine); only replace an error.
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let built = WebviewWindowBuilder::new(&a.handle, "main", WebviewUrl::App(route.into()))
+        .title("Loom")
+        .inner_size(1280.0, 820.0)
+        .min_inner_size(480.0, 400.0)
+        .center()
+        .build();
+    if let Err(e) = built {
+        tracing::error!("can't open Loom's window: {e}");
+    }
+}
+
 /// The main window on `url` (created if needed), with the page bridge.
 pub fn open_main_at(a: &AppRef, url: &str) {
     if let Some(w) = a.handle.get_webview_window("main") {
+        // The offline page is an app page without the bridge: replace the window.
+        if w.url().map(|u| is_app_page(&u)).unwrap_or(false) {
+            let _ = w.destroy();
+            return open_main_at(a, url);
+        }
         if let Ok(u) = url::Url::parse(url) {
             let _ = w.navigate(u);
         }
