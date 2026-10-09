@@ -36,6 +36,10 @@ jobs:
       - name: Start a test Loom
         working-directory: .
         run: |
+          # Pull Docker Hub images through Google's mirror: GitHub's runners
+          # share Docker Hub's anonymous pull limit, and it often runs out.
+          echo '{"registry-mirrors": ["https://mirror.gcr.io"]}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
           # The containers run as uid 1000; the runner isn't.
           mkdir -p "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache" && touch "$LOOM_TEST_DIR/.loomtest"
           sudo chown 1000:1000 "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache"
@@ -100,6 +104,8 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Start a test Loom
         run: |
+          echo '{"registry-mirrors": ["https://mirror.gcr.io"]}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
           mkdir -p "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache" && touch "$LOOM_TEST_DIR/.loomtest"
           sudo chown 1000:1000 "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache"
           # Docker Hub sometimes refuses pulls for a moment (429): try again.
