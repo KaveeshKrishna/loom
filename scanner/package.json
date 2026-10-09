@@ -12,7 +12,7 @@
     "@prisma/client": "^6.11.1",
     "exif-reader": "2.0.3",
     "mime-types": "2.1.35",
-    "pg": "8.23.0",
+    "pg": "8.23.1",
     "sharp": "0.35.4"
   },
   "devDependencies": {
