@@ -1,0 +1,20 @@
+# Loom for Windows (and, from the same code, macOS/Linux).
+#   engine/     the transfer engine: a plain library, tested against a real Loom
+#   src-tauri/  the app: windows, tray, Explorer integration, the web view bridge
+#   ui/         the app's own screens (Transfers, Settings, sign-in, folder picker)
+[workspace]
+members = ["engine", "src-tauri"]
+resolver = "2"
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+license = "PolyForm-Noncommercial-1.0.0"
+repository = "https://github.com/KaveeshKrishna/loom"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

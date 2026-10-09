@@ -1,0 +1,74 @@
+name: Loom for Windows
+
+on:
+  push:
+    branches: [main, dev]
+    paths: ["clients/desktop/**", ".github/workflows/desktop.yml"]
+    tags: ["desktop-v*"]
+  pull_request:
+    paths: ["clients/desktop/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Build and test on Windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: clients/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: clients/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/desktop
+      - run: npm ci
+      - name: Screens typecheck and build
+        run: npm run build
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Unit tests
+        run: cargo test --workspace
+      - name: Build the installer
+        run: npx tauri build --bundles nsis
+      - name: Installer runs silently and installs the app
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList "/S" -Wait
+          $exe = Join-Path $env:LOCALAPPDATA "Loom/Loom.exe"
+          if (-not (Test-Path $exe)) { Get-ChildItem -Recurse $env:LOCALAPPDATA -Filter Loom.exe | Select-Object -First 5; throw "Loom.exe not installed" }
+          Write-Host "Installed: $exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: loom-windows-installer
+          path: clients/desktop/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+
+  release:
+    name: Publish the release
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: loom-windows-installer
+          path: dist
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" dist/*.exe --repo "$GITHUB_REPOSITORY" --title "Loom for Windows ${TAG#desktop-v}" --notes "Download the setup file below and run it. Windows may warn about an unknown publisher the first time (the app isn't code-signed): choose More info, then Run anyway."

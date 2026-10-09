@@ -1,0 +1,29 @@
+[package]
+name = "loom-engine"
+description = "Resumable, parallel uploads and downloads for Loom"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+base64 = "0.22"
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+hex = "0.4"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json", "stream", "http2"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util"] }
+tracing = "0.1"
+url = "2"
+filetime = "0.2"
+
+[dev-dependencies]
+rcgen = "0.13"
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "net"] }
