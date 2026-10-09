@@ -2,6 +2,12 @@
 
 What changed in each version of Loom, newest first. Update with `./scripts/update.sh`, see [docs/UPGRADING.md](docs/UPGRADING.md).
 
+## 2.2.3
+
+- **New folders appear without a refresh.** Uploading a folder (from the website or a Loom app) now shows it in the folder you're looking at straight away; before, it only appeared after reloading the page. During long uploads into the open folder, new files keep appearing as they finish.
+- **A real logo.** Loom's mark is woven threads: warp and weft passing over and under, the way a loom turns loose threads into cloth. It's on the sign-in pages, the sidebar and shared links, and Loom now has a favicon and a home-screen icon (and a web app manifest).
+- **Devices › Loom for Windows / Loom for Android** download the newest app directly (they used to open an empty GitHub search). The Android app is out: see [docs/APPS.md](docs/APPS.md).
+
 ## 2.2.2
 
 - **Dropped files are confirmed first.** Dropping files or folders on Loom asks "Upload 3 files to Photos?" before anything is uploaded.

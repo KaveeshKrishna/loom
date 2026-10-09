@@ -70,6 +70,10 @@ docker compose ps        # wait until loom-web shows (healthy)
 
 ## Version notes
 
+### 2.2.3
+
+No manual steps: `./scripts/update.sh`. No migration. Brings the new logo and favicon, and the Devices page's download buttons for the apps.
+
 ### 2.2.2
 
 No manual steps: `./scripts/update.sh`. No migration. Pages that are open during the update reload themselves once it's done.

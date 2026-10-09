@@ -9,6 +9,7 @@ Drag files or whole folders onto any folder view, or use **New → Upload files 
 - **Progress.** The upload panel in the corner shows overall progress, speed and time remaining. You can minimize it to a small pill that keeps showing progress; click the pill to bring the panel back.
 - **Pause, resume, cancel.** Pause or cancel each file in the panel, or use **Pause all**, **Resume all** and **Cancel all**. A paused upload keeps what was already sent and continues from there.
 - **"Uploaded" means stored.** A file is marked Uploaded as soon as every byte is safely on disk and verified. Its thumbnail appears a few seconds later ("preview generating in background").
+- **New folders appear by themselves.** Uploading a folder shows it in the folder you're looking at as soon as its first file arrives; files appear as they finish, also when someone else (or a Loom app) uploads.
 - **Interruptions.** If your connection drops, uploads retry on their own. If you close the tab or the server loses power, the upload panel lists the unfinished uploads the next time you open Loom. Pick the same files again (in the same folder) within 24 hours to resume where they stopped, even from another browser, or click **Discard** to free the space. Unfinished files never show up in your folders.
 - **Files that already exist.** Before anything is sent, Loom asks what to do with each file that's already there: **Replace** (the old one goes to Trash), **Skip**, or **Keep both** (the new one becomes `name (1).ext`). Tick "Do this for the other N conflicts" to answer them all at once. Both files' size and date are shown, and probable duplicates are flagged.
 - **Resuming a folder upload.** After an interrupted folder upload, pick the same folder again and choose Skip for all. Only what's missing is uploaded, with no `photo (1).jpg` duplicates.
@@ -81,7 +82,7 @@ Right-click a file or folder and choose **Share link…** to create a link anyon
 
 **Devices** (in the sidebar and the user menu) lists the [Loom apps](APPS.md) signed in to your account: their name, app version and when they were last active. Rename or remove them there; removing one signs it out at once.
 
-To add a phone or tablet, choose **Show pairing code** and scan the QR code from the app (or type the code). The code works once and expires after 10 minutes. On Windows, choose **Sign in** in the app instead: it opens Loom and asks you to allow it, after checking the code both show.
+To add a phone or tablet, choose **Show pairing code** and scan the QR code from the app (or type the code). The code works once and expires after 10 minutes. Or choose **Sign in** in the app: it opens Loom and asks you to allow it, after checking the code both show. **Loom for Windows** and **Loom for Android** at the top of the page download the newest apps.
 
 The Owner sees everyone's devices and can remove any of them.
 

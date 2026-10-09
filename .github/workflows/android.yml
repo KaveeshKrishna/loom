@@ -39,7 +39,8 @@ jobs:
           # The containers run as uid 1000; the runner isn't.
           mkdir -p "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache" && touch "$LOOM_TEST_DIR/.loomtest"
           sudo chown 1000:1000 "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache"
-          tests/stack/stack.sh up
+          # Docker Hub sometimes refuses pulls for a moment (429): try again.
+          for i in 1 2 3; do tests/stack/stack.sh up && break; [ $i = 3 ] && exit 1; sleep 45; done
       - name: Engine tests (against the test Loom)
         run: gradle --no-daemon :engine:test
       - name: Release signing key
@@ -101,7 +102,8 @@ jobs:
         run: |
           mkdir -p "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache" && touch "$LOOM_TEST_DIR/.loomtest"
           sudo chown 1000:1000 "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache"
-          tests/stack/stack.sh up
+          # Docker Hub sometimes refuses pulls for a moment (429): try again.
+          for i in 1 2 3; do tests/stack/stack.sh up && break; [ $i = 3 ] && exit 1; sleep 45; done
       - name: Build the app and its tests
         working-directory: clients/android
         run: gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest

@@ -51,7 +51,11 @@ Every push and PR to `main` or `dev` runs `.github/workflows/ci.yml`:
 | scanner | `tsc --noEmit` |
 | Docker | The real installer runs non-interactively, the scanner runs as `node`, `/api/health` reports the right version, backup works, and `update.sh` runs |
 
-There is no unit test suite yet, so please describe how you tested your change.
+Changes to the apps run their own workflows: `desktop.yml` (Loom for Windows: build, tests, real WebView2 self-tests) and `android.yml` (Loom for Android: the engine's tests against a test Loom, lint, and the app on phone and tablet emulators, with screenshots as artifacts).
+
+Integration tests run against a disposable Loom (`tests/stack/stack.sh up`): `cd tests && npm run api` (API), `tests/run-e2e.sh` (Playwright, desktop and phone/tablet sizes), and the app engines' live tests (`LOOM_TEST_URL=http://localhost:18085 cargo test -p loom-engine` in `clients/desktop`, `gradle -PengineOnly :engine:test` in `clients/android`). There is no unit test suite for the web app yet, so please describe how you tested your change.
+
+The logo lives in `brand/`: `brand/mark.py` draws it, `bash brand/build.sh` renders every icon from it (website, Windows, Android).
 
 ## Schema changes
 
