@@ -219,6 +219,9 @@ class LoomWeb(
         /** Debug builds: what the page managed to load, in the log a few seconds later. */
         private const val DIAGNOSE = """setTimeout(() => console.log("DIAG " + JSON.stringify({
   url: location.pathname, ready: document.readyState, text: document.body ? document.body.innerText.length : -1,
+  chrome: (navigator.userAgent.match(/Chrome\/[\d.]+/) || [""])[0],
+  invisible: Array.from(document.querySelectorAll("body *")).filter((e) => getComputedStyle(e).opacity === "0").map((e) => e.tagName + "." + String(e.className).slice(0, 60)).slice(0, 8),
+  main: (() => { const m = document.querySelector("main"); if (!m) return null; const r = m.getBoundingClientRect(); return [Math.round(r.top), Math.round(r.height), getComputedStyle(m).opacity, getComputedStyle(m).visibility]; })(),
   size: [innerWidth, innerHeight, document.documentElement.scrollHeight, scrollY],
   scripts: performance.getEntriesByType("resource").filter((r) => r.initiatorType === "script" || r.initiatorType === "fetch")
     .map((r) => r.name.split("/").pop().slice(0, 40) + ":" + Math.round(r.duration) + "ms:" + r.transferSize).slice(0, 40),

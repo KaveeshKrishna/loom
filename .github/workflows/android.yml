@@ -141,7 +141,7 @@ jobs:
           target: ${{ matrix.target }}
           arch: x86_64
           profile: ${{ matrix.profile }}
-          disable-animations: true
+          disable-animations: false
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           working-directory: clients/android
           script: bash ../../.github/scripts/android-emulator.sh
