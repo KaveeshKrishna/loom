@@ -36,10 +36,14 @@ jobs:
       - name: Start a test Loom
         working-directory: .
         run: |
-          # Pull Docker Hub images through Google's mirror: GitHub's runners
+          # The base images come from Google's Docker Hub mirror: GitHub's runners
           # share Docker Hub's anonymous pull limit, and it often runs out.
-          echo '{"registry-mirrors": ["https://mirror.gcr.io"]}' | sudo tee /etc/docker/daemon.json
-          sudo systemctl restart docker
+          for img in postgres:17-alpine caddy:2.11-alpine; do
+            docker pull -q "mirror.gcr.io/library/$img" && docker tag "mirror.gcr.io/library/$img" "$img"
+          done
+          printf '[registry."docker.io"]\n  mirrors = ["mirror.gcr.io"]\n' > "$RUNNER_TEMP/buildkitd.toml"
+          docker buildx create --name mirrored --driver docker-container --config "$RUNNER_TEMP/buildkitd.toml" --use
+          export BUILDX_BUILDER=mirrored
           # The containers run as uid 1000; the runner isn't.
           mkdir -p "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache" && touch "$LOOM_TEST_DIR/.loomtest"
           sudo chown 1000:1000 "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache"
@@ -104,8 +108,14 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Start a test Loom
         run: |
-          echo '{"registry-mirrors": ["https://mirror.gcr.io"]}' | sudo tee /etc/docker/daemon.json
-          sudo systemctl restart docker
+          # The base images come from Google's Docker Hub mirror: GitHub's runners
+          # share Docker Hub's anonymous pull limit, and it often runs out.
+          for img in postgres:17-alpine caddy:2.11-alpine; do
+            docker pull -q "mirror.gcr.io/library/$img" && docker tag "mirror.gcr.io/library/$img" "$img"
+          done
+          printf '[registry."docker.io"]\n  mirrors = ["mirror.gcr.io"]\n' > "$RUNNER_TEMP/buildkitd.toml"
+          docker buildx create --name mirrored --driver docker-container --config "$RUNNER_TEMP/buildkitd.toml" --use
+          export BUILDX_BUILDER=mirrored
           mkdir -p "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache" && touch "$LOOM_TEST_DIR/.loomtest"
           sudo chown 1000:1000 "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache"
           # Docker Hub sometimes refuses pulls for a moment (429): try again.
