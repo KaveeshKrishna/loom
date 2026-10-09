@@ -59,6 +59,7 @@ import app.loom.android.ui.ApprovalBanner
 import app.loom.android.ui.DestinationPicker
 import app.loom.android.ui.LoomTheme
 import app.loom.android.ui.Offline
+import app.loom.android.ui.OldWebView
 import app.loom.android.ui.Onboarding
 import app.loom.android.ui.Scanner
 import app.loom.android.ui.SettingsScreen
@@ -301,7 +302,7 @@ class MainActivity : ComponentActivity(), LoomWeb.Events {
             return
         }
         WebViewCheck.tooOld(this)?.let { version ->
-            app.loom.android.ui.OldWebView(version)
+            OldWebView(version)
             return
         }
         val w = web()
