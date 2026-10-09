@@ -51,6 +51,9 @@ web/next-env.d.ts
 # Scanner build output
 /scanner/dist/
 
+# Test output (screenshots, traces)
+/tests/e2e-results/
+
 # Prisma
 *.db
 *.db-journal

@@ -1,0 +1,103 @@
+# A disposable Loom for the integration tests (tests/README.md).
+#
+# Built from this checkout, with its own database volume, media and cache
+# folders and ports, so it never touches a real installation. Started and
+# stopped by tests/stack/stack.sh, which uses the compose project name
+# "loomtest".
+#
+# Nothing here reads the repo's .env: every setting is inline.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "5m"
+    max-file: "2"
+
+x-env: &env
+  DATABASE_URL: postgresql://loom:loomtest@postgres:5432/loom
+  NODE_ENV: production
+  NEXT_TELEMETRY_DISABLED: "1"
+  BETTER_AUTH_SECRET: loom-integration-tests-only-secret-0123456789abcdef
+  BETTER_AUTH_URL: http://localhost:${LOOM_TEST_PORT:-18085}
+  TRUSTED_ORIGINS: http://localhost:${LOOM_TEST_PORT:-18085}
+  # Small chunks and a small write window keep the tests fast and let them
+  # reach the limits.
+  LOOM_UPLOAD_CHUNK_MB: "1"
+  LOOM_UPLOAD_WINDOW_MB: "64"
+  LOOM_LAN_URL: https://127.0.0.1:${LOOM_TEST_LAN_PORT:-18443}
+  LOOM_LAN_HOST: 127.0.0.1
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    logging: *logging
+    environment:
+      POSTGRES_DB: loom
+      POSTGRES_USER: loom
+      POSTGRES_PASSWORD: loomtest
+    ports:
+      # For the tests (time travel on upload sessions, checking rows).
+      - "127.0.0.1:${LOOM_TEST_PG_PORT:-18432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loom -d loom"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  loom-web:
+    build:
+      context: ../../web
+    logging: *logging
+    ports:
+      - "127.0.0.1:${LOOM_TEST_PORT:-18085}:3000"
+    environment: *env
+    volumes:
+      - ${LOOM_TEST_DIR:?set LOOM_TEST_DIR}/media:/media
+      - ${LOOM_TEST_DIR:?set LOOM_TEST_DIR}/cache:/cache
+      - lan-public:/lan-pki:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 -O- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+
+  loom-scanner:
+    build:
+      context: ../../scanner
+    logging: *logging
+    environment: *env
+    volumes:
+      - ${LOOM_TEST_DIR:?set LOOM_TEST_DIR}/media:/media
+      - ${LOOM_TEST_DIR:?set LOOM_TEST_DIR}/cache:/cache
+      - ../../web/prisma:/app/prisma:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  loom-lan:
+    image: caddy:2.11-alpine
+    logging: *logging
+    ports:
+      - "127.0.0.1:${LOOM_TEST_LAN_PORT:-18443}:8443"
+    environment:
+      LOOM_LAN_HOST: 127.0.0.1
+    command: ["sh", "-c", "cp /pki/public/root.crt /lan-public/root.crt && exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"]
+    volumes:
+      - ../../lan/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${LOOM_TEST_DIR:?set LOOM_TEST_DIR}/lan-pki:/pki:ro
+      - lan-public:/lan-public
+      - lan-caddy:/data
+    depends_on:
+      loom-web:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  lan-public:
+  lan-caddy:

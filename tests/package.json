@@ -1,0 +1,16 @@
+{
+  "name": "loom-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "api": "node --import tsx --test --test-concurrency=1 api/*.test.ts",
+    "e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.48.0",
+    "@types/node": "22.15.30",
+    "@types/pg": "8.23.1",
+    "pg": "8.23.0",
+    "tsx": "4.20.3"
+  }
+}
