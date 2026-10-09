@@ -1,0 +1,67 @@
+# LAN access for the Loom apps (optional; see docs/CONFIGURATION.md → LAN access).
+#
+# Serves Loom over HTTPS on your local network so the desktop and mobile apps
+# can upload straight to this machine when they're at home, instead of going
+# out to the internet and back through your tunnel or reverse proxy.
+#
+# Certificates come from a private certificate authority that
+# scripts/lan.sh creates once (LOOM_LAN_PKI_PATH, mounted at /pki). loom-web
+# only sees its public certificate and hands it to paired apps over your
+# normal HTTPS address; the apps trust it for this LAN address only.
+#
+# Only the apps are let in: requests need a device token, except the two
+# endpoints an app uses to find this address. No sign-in page, no browser
+# sessions on the local network.
+{
+	admin off
+	persist_config off
+	# No HTTP listener, no attempt to install the CA on this machine.
+	auto_https disable_redirects
+	skip_install_trust
+	# Apps connect by IP address, which carries no SNI.
+	default_sni {$LOOM_LAN_HOST}
+	pki {
+		ca local {
+			name "Loom LAN"
+			root {
+				cert /pki/public/root.crt
+				key /pki/ca/root.key
+			}
+		}
+	}
+}
+
+(loom) {
+	reverse_proxy loom-web:3000 {
+		# Marks requests as LAN ones: loom-web then accepts device tokens only.
+		header_up X-Loom-Via lan
+		# Headers a client on the network could use to fake its address.
+		header_up -Cf-Connecting-Ip
+		header_up -X-Real-Ip
+		# Large chunk uploads stream through without buffering.
+		flush_interval -1
+		transport http {
+			read_timeout 10m
+			write_timeout 10m
+		}
+	}
+}
+
+https://{$LOOM_LAN_HOST}:8443 {
+	tls internal
+	request_body {
+		max_size 100MB
+	}
+
+	@open path /api/health /api/client/info
+	@app header Authorization "Bearer loomd_*"
+	handle @open {
+		import loom
+	}
+	handle @app {
+		import loom
+	}
+	handle {
+		respond "This address is for the Loom apps. Open Loom at its usual address in a browser." 403
+	}
+}

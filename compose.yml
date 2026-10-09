@@ -38,6 +38,9 @@ services:
     volumes:
       - ${LOOM_MEDIA_PATH:-./data/media}:/media
       - ${LOOM_CACHE_PATH:-./data/cache}:/cache
+      # The public certificate of the LAN service's authority (read-only),
+      # handed to paired apps. Empty unless LAN access is on.
+      - lan_public:/lan-pki:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -77,6 +80,34 @@ services:
       retries: 3
       start_period: 15s
 
+  # ── LAN access for the apps (optional) ─────────────────────────────────────
+  # HTTPS on your local network so the desktop and mobile apps upload straight
+  # to this machine at home. Turn it on with ./scripts/lan.sh enable — see
+  # docs/CONFIGURATION.md → LAN access.
+  loom-lan:
+    image: caddy:2.11-alpine
+    profiles: ["lan"]
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - "${LOOM_LAN_BIND:-127.0.0.1}:${LOOM_LAN_PORT:-8443}:8443"
+    environment:
+      LOOM_LAN_HOST: ${LOOM_LAN_HOST:-}
+    # Publish the authority's public certificate for loom-web, then serve.
+    command: ["sh", "-c", "cp /pki/public/root.crt /lan-public/root.crt && exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"]
+    volumes:
+      - ./lan/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${LOOM_LAN_PKI_PATH:-./data/lan-pki}:/pki:ro
+      - lan_public:/lan-public
+      - lan_caddy:/data
+    depends_on:
+      loom-web:
+        condition: service_healthy
+
 volumes:
   postgres_data:
+    driver: local
+  lan_public:
+    driver: local
+  lan_caddy:
     driver: local

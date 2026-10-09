@@ -55,3 +55,18 @@ confirm() {
   read -r -p "  $1 [y/N] " answer || true
   [[ "$answer" =~ ^[Yy]$ ]]
 }
+
+# Set KEY=value in .env: replaces the existing line in place, or appends it.
+# Values are simple (paths, numbers, addresses) — no quoting is applied.
+env_set() {
+  local key="$1" value="$2" tmp
+  [ -f .env ] || fail "No .env found. Run ./scripts/install.sh first."
+  tmp="$(mktemp .env.XXXXXX)"
+  awk -v k="$key" -v v="$value" '
+    index($0, k "=") == 1 { if (!done) print k "=" v; done = 1; next }
+    { print }
+    END { if (!done) print k "=" v }
+  ' .env > "$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" .env
+}
