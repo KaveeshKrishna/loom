@@ -66,7 +66,7 @@ pub struct ServerCheck {
 
 /// "loom.example.com" → "https://loom.example.com" (no path, no trailing slash).
 fn normalize_url(input: &str) -> Option<String> {
-    let s = input.trim().trim_end_matches('/');
+    let s = input.trim();
     let with_scheme = if s.contains("://") { s.to_string() } else { format!("https://{s}") };
     let u = url::Url::parse(&with_scheme).ok()?;
     if !matches!(u.scheme(), "https" | "http") || u.host_str().is_none() {
