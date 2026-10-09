@@ -4,6 +4,11 @@ Each section becomes the release notes the app shows in Settings › Updates.
 Loom for Windows needs Loom 2.2 or later on the server; the newest features
 need the version noted.
 
+## 1.1.1
+
+- Loom's new logo, woven threads, for the app, the taskbar, the tray and the installer.
+- Uploading a folder shows it in Loom's window straight away (needs Loom 2.2.3).
+
 ## 1.1.0
 
 - Updates install themselves: Loom downloads new versions in the background and asks before installing (Settings › Updates also offers "install when idle" or "only tell me"). This is the last version you install by hand.
