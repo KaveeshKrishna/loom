@@ -46,16 +46,25 @@ object Pairing {
 
     suspend fun check(input: String): Check {
         val url = normalize(input) ?: return Check.Problem("That isn't a web address.")
-        return try {
-            http.newCall(Request.Builder().url("$url/api/client/info").build()).await().use { res ->
-                if (res.code == 404) return Check.Problem("This Loom is too old for the app. Update Loom to 2.2 or later.")
-                val o = runCatching { Json.parseToJsonElement(res.body!!.string()).jsonObject }.getOrNull()
-                if (o?.get("product")?.jsonPrimitive?.contentOrNull != "loom") return Check.Problem("There's no Loom at that address.")
-                Check.Ok(url, o["version"]?.jsonPrimitive?.contentOrNull ?: "")
+        var last: Check = Check.Problem("There's no Loom at that address.")
+        // One more try after a moment: a Loom that's just restarting answers with an error briefly.
+        repeat(2) { attempt ->
+            if (attempt > 0) delay(1500)
+            last = try {
+                http.newCall(Request.Builder().url("$url/api/client/info").build()).await().use { res ->
+                    val o = runCatching { Json.parseToJsonElement(res.body!!.string()).jsonObject }.getOrNull()
+                    when {
+                        res.code == 404 && o == null -> Check.Problem("There's no Loom at that address, or it's older than 2.2 (the app needs 2.2 or later).")
+                        !res.isSuccessful -> Check.Problem("Loom at that address answered with an error (HTTP ${res.code}). Try again in a moment.")
+                        o?.get("product")?.jsonPrimitive?.contentOrNull != "loom" -> Check.Problem("There's no Loom at that address.")
+                        else -> return Check.Ok(url, o["version"]?.jsonPrimitive?.contentOrNull ?: "")
+                    }
+                }
+            } catch (e: IOException) {
+                Check.Problem("Can't reach that address. Check it, and that this device is online.")
             }
-        } catch (e: IOException) {
-            Check.Problem("Can't reach that address. Check it, and that this phone is online.")
         }
+        return last
     }
 
     fun newToken(): Pair<String, String> {

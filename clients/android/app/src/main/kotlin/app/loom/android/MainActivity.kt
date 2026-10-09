@@ -423,7 +423,8 @@ class MainActivity : ComponentActivity(), LoomWeb.Events {
         DropHelper.configureView(
             this,
             w.view,
-            arrayOf("*/*"),
+            // Any file (DropHelper doesn't take "*/*").
+            arrayOf("image/*", "video/*", "audio/*", "text/*", "application/*", "font/*", "model/*"),
             DropHelper.Options.Builder().setHighlightColor(getColor(R.color.loom_blue)).setHighlightCornerRadiusPx(0).build(),
         ) { _, payload ->
             val clip = payload.clip
