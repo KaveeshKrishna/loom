@@ -30,7 +30,6 @@ android {
         versionName = version.getProperty("versionName")
         buildConfigField("String", "UPDATE_URL", "\"$updateUrl\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        testInstrumentationRunnerArguments["loomTestUrl"] = System.getenv("LOOM_TEST_URL_EMULATOR") ?: ""
     }
 
     signingConfigs {

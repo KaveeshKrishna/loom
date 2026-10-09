@@ -32,6 +32,7 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:enableOnBackInvokedCallback="true"
+        android:usesCleartextTraffic="true"
         android:resizeableActivity="true"
         android:theme="@style/Theme.Loom"
         tools:targetApi="34">

@@ -145,8 +145,10 @@ object Notifications {
     fun plural(n: Long, word: String) = if (n == 1L) word else "${word}s"
 }
 
-/** Sizes and speeds for people. */
+/** Sizes and counts for people. */
 object Format {
+    fun items(n: Int) = if (n == 1) "1 item" else "$n items"
+
     fun bytes(n: Long): String {
         if (n < 1000) return "$n B"
         val units = listOf("KB", "MB", "GB", "TB")

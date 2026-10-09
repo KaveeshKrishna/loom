@@ -222,5 +222,7 @@ jobs:
           # The rolling "updates" release holds the manifests the apps check.
           gh release view updates --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
             gh release create updates --repo "$GITHUB_REPOSITORY" --prerelease --title "Update manifests" \
-              --notes "Files the Loom apps read to find their updates. Nothing to download here: get the apps from their own releases."
-          gh release upload updates windows.json --clobber --repo "$GITHUB_REPOSITORY"
+              --notes "Files the Loom apps read to find their updates, and the newest apps under fixed names (the download links on Loom's Devices page)."
+          # The newest installer under a name that never changes: Loom's Devices page links to it.
+          cp "$setup" Loom-Windows-Setup.exe
+          gh release upload updates windows.json Loom-Windows-Setup.exe --clobber --repo "$GITHUB_REPOSITORY"
