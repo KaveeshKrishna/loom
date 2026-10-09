@@ -2,6 +2,30 @@
 
 What changed in each version of Loom, newest first. Update with `./scripts/update.sh`, see [docs/UPGRADING.md](docs/UPGRADING.md).
 
+## 2.2.0
+
+The Loom apps: Loom for Windows, with uploads and downloads that keep going in the background and survive restarts. Plus fixes for iPhones and tablets.
+
+### Apps
+
+- **Loom for Windows** ([docs/APPS.md](docs/APPS.md)) shows Loom in a window and runs every upload and download through its own transfer manager: they continue with the window closed, resume after a restart or a dropped connection (network trouble never fails a transfer, it waits and retries), can be paused and resumed, and several files and parts of files move at once. "Upload to Loom" in File Explorer and Send to. An Android app for phones and tablets is next.
+- **Devices** (sidebar and user menu) lists the apps signed in to your account, with rename and remove. Pair an app by approving it in Loom after checking the code it shows, or with a one-time code shown as a QR code. Removing a device signs it out at once; resetting a user's password removes their devices.
+- **LAN access** (optional, `./scripts/lan.sh enable`): the apps upload straight to the server over your home network, with HTTPS from Loom's own certificate authority, instead of out to the internet and back.
+- Uploads from the apps use numbered chunks sent in parallel and in any order, resumable for 7 days, and safe on exFAT drives (they never land far ahead of what's already written).
+
+### Website
+
+- Inside the apps, uploads and downloads go to the app's transfer manager after the usual conflict question.
+- Browser uploads hold a Web Lock, so Chrome doesn't freeze a background tab mid-upload.
+- iPhone and tablets: item menus and other controls that only appeared on hover are always visible on touch screens (they were hidden on tablets in landscape); text fields are 16 px so iPhone Safari no longer zooms in; on phones, unfinished uploads show as a small pill instead of a panel covering half the screen.
+- Signing in returns you to the page you were on.
+
+### Notes
+
+- A database migration adds the devices tables and new upload columns (additive; rollback works).
+- Behind Cloudflare Tunnel, pass the visitor's real address on: see [Reverse proxy → Cloudflare Tunnel](docs/REVERSE-PROXY.md#cloudflare-tunnel).
+- New optional settings: `LOOM_UPLOAD_RESUME_DAYS`, `LOOM_UPLOAD_PARALLEL_CHUNKS`, `LOOM_UPLOAD_PARALLEL_PER_USER`, `LOOM_UPLOAD_MAX_INFLIGHT`, `LOOM_UPLOAD_WINDOW_MB`, and the LAN settings ([Configuration](docs/CONFIGURATION.md)).
+
 ## 2.1.0
 
 Name clashes are handled like in Windows, and Loom now survives power cuts in the middle of anything.

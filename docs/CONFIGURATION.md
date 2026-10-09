@@ -37,7 +37,8 @@ Related behavior that isn't configurable:
 
 - **Public sign-up is always disabled.** The first account is created on the setup page; after that the Owner adds users in Settings → Users.
 - **Sign-in is rate-limited** to 10 attempts per minute per IP address (password changes to 5 per minute). Pass `X-Forwarded-For` from your proxy so this applies per visitor.
-- **Sessions** last 30 days and are refreshed once a day while in use. Changing a user's password signs them out everywhere.
+- **Sessions** last 30 days and are refreshed once a day while in use. Changing a user's password signs them out everywhere, including their apps.
+- **Apps** (see [APPS.md](APPS.md)) sign in with a device token instead of a password: paired by approving the request in Loom, or with a one-time code from the Devices page. Only a hash of each token is stored. Removing a device in Devices signs it out at once. Device tokens can't do Owner administration, manage devices or create share links.
 - **Share links** are off until the Owner enables them in Settings → Sharing. Link tokens are stored encrypted with a key derived from `BETTER_AUTH_SECRET`; changing the secret doesn't break existing links, but they can no longer be copied again from the UI.
 
 ## Uploads and background work
@@ -46,12 +47,36 @@ All optional, with sensible defaults. Leave them unset unless you have a reason.
 
 | Variable | Default | Limits | Purpose |
 |---|---|---|---|
-| `LOOM_UPLOAD_CHUNK_MB` | `32` | 1 to 95 | Size of each upload chunk. Must be below your reverse proxy's request size limit (Cloudflare's is 100 MB; nginx's `client_max_body_size` must be larger than this). |
+| `LOOM_UPLOAD_CHUNK_MB` | `32` | 1 to 95 | Size of each upload chunk from the browser (the apps choose their own, within 1 to 95 MB). Must be below your reverse proxy's request size limit (Cloudflare's is 100 MB; nginx's `client_max_body_size` must be larger than this). |
 | `LOOM_MAX_UPLOAD_GB` | no limit | | Largest single file that can be uploaded. Independently, an upload is always refused if it would leave less than 256 MB free on the drive. |
+| `LOOM_UPLOAD_RESUME_DAYS` | `7` | 1 to 30 | How long an app's unfinished upload stays resumable without progress (a browser's: 24 hours). |
+| `LOOM_UPLOAD_PARALLEL_CHUNKS` | `4` | 1 to 16 | Chunks of one file an app may send at the same time. |
+| `LOOM_UPLOAD_PARALLEL_PER_USER` | `8` | 1 to 64 | Chunks one user's apps may send at the same time, across files. |
+| `LOOM_UPLOAD_MAX_INFLIGHT` | `16` | 1 to 128 | Chunks being written at once on the whole server. |
+| `LOOM_UPLOAD_WINDOW_MB` | `512` | 64 to 16384 | How far ahead of the first missing part an app's chunk may land. Drives without sparse files (exFAT, common on external disks) fill any gap with zeros on the spot, so this keeps that to a bounded amount. |
 | `LOOM_WORKER_CONCURRENCY` | `2` | 1 to 8 | How many files the scanner processes in parallel (thumbnails, previews, video posters, metadata). Raise it on a machine with more cores; use `1` on a Raspberry Pi. |
 | `LOOM_SHARP_THREADS` | `2` | 1 to 4 | Threads the image library (sharp) uses per job. |
 | `LOOM_MAX_TRANSCODES` | `2` | at least 1 | How many videos can be converted for streaming at the same time. Each uses roughly one CPU core. |
 | `LOOM_AUDIT_RETENTION_DAYS` | `180` | at least 1 | How long audit log entries are kept. |
+
+## LAN access for the apps
+
+Optional: HTTPS on your local network so the [apps](APPS.md) upload straight to this machine at home. `./scripts/lan.sh enable` sets all of these for you.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `COMPOSE_PROFILES` | empty | Contains `lan` while LAN access is on, which starts the `loom-lan` service. |
+| `LOOM_LAN_HOST` | none | This machine's address on your network, e.g. `192.168.1.20`. The certificate is issued for it. |
+| `LOOM_LAN_PORT` | `8443` | Port of the LAN address. |
+| `LOOM_LAN_BIND` | `127.0.0.1` | Host address the port is published on; `lan.sh` sets it to `LOOM_LAN_HOST` so it's only on the LAN interface (Docker's published ports bypass host firewalls, so don't use `0.0.0.0`). |
+| `LOOM_LAN_URL` | from host and port | Override the address given to the apps, if it differs from `https://LOOM_LAN_HOST:LOOM_LAN_PORT`. |
+| `LOOM_LAN_PKI_PATH` | `./data/lan-pki` | The private certificate authority: `ca/root.key` (only readable by you and the loom-lan container) and `public/root.crt`. Must not be inside the media folder. Back it up; if it's lost, `lan.sh enable` makes a new one and the apps re-trust it automatically. |
+
+What the LAN address does and doesn't do:
+
+- It only lets in requests carrying an app's device token, plus the two endpoints apps use to find it. There's no sign-in page and no browser session on it.
+- Address headers sent by clients on your network are ignored; the proxy sets them.
+- loom-web only ever sees the authority's public certificate (`/api/client/info` hands it to signed-in apps), never its key.
 
 ## Scripts
 

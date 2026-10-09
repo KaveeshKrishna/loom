@@ -82,6 +82,33 @@ Uploads are chunked, resumable and verified. The browser side is `web/components
 
 A file only appears in `/media` once it's complete. The scanner never looks inside `.tmp-upload/`, and abandoned sessions are cleaned up after 24 hours (or right away from the upload panel or Settings → Storage).
 
+### Uploads from the apps
+
+The [apps](APPS.md) use a second mode of the same protocol, `mode: "chunks"`, built for long, resumable transfers:
+
+- Chunks are numbered (`PUT …?chunk=N`) and may arrive out of order and several at once. Each is written at its own position in the `.partial` file, checked against its SHA-256 (required here), flushed, then marked in a per-session bitmap with one atomic `UPDATE … set_bit()`, so parallel chunks never lose each other's marks. A failed chunk is simply sent again; nothing is truncated.
+- `GET /api/upload/sessions/:id` lists the chunks still missing. That's how an app resumes after days, a reboot or a server restart: the server is the source of truth, the app doesn't need to remember what it sent.
+- "Out of order" is bounded by a write window (`LOOM_UPLOAD_WINDOW_MB`, default 512 MB past the first missing chunk). On drives without sparse files (exFAT) a far-ahead write makes the kernel zero-fill the gap on the spot, which could mean gigabytes of extra writes and requests that time out.
+- Finishing (`POST …/complete`) runs the same finalize as the browser's last chunk. It can be repeated safely: the result is kept for a day and returned again, so a lost response never turns into a duplicate `name (1).ext`.
+- A retried create with the same `clientRef` returns the same session. Apps pick their chunk size (1 to 95 MB) and their sessions stay resumable for 7 days (`LOOM_UPLOAD_RESUME_DAYS`).
+- In-flight chunks are capped per upload, per user and in total, to keep the server's memory and disk queue bounded.
+- Browsers and apps only list and clean up their own unfinished uploads: "Discard" in the browser never removes a paused app upload.
+
+## Devices and the apps
+
+The apps show Loom's own web UI in a window and add a transfer engine and OS integration around it. On the server:
+
+- **Device tokens.** An app calls the API with `Authorization: Bearer loomd_…`. Only the token's SHA-256 is stored (`devices`). The app generates the token itself and sends only the hash while pairing, so no token ever crosses the wire. Lookups are cached for 15 seconds; removing a device (Devices page, password reset, deleting the user) cuts it off within that time and cascades to its web session and unfinished uploads.
+- **Pairing**, valid 10 minutes, single use (`device_pairings`): either the app asks and the user approves on `/pair/<id>` after checking a six-digit code shown on both sides, or the user creates a one-time code on the Devices page (shown as a QR code) and the app redeems it. Pairing endpoints are rate-limited.
+- **Signing the app's window in.** The app asks for a one-time link (`POST /api/devices/web-login`); opening it sets a normal session cookie tied to the device and redirects into Loom. Links from other sites are refused.
+- **Limits of a device token.** It can't do Owner administration, manage devices, create pairing codes or share links; those need a browser sign-in, so a lost device can't mint more access.
+- **`GET /api/client/info`** gives apps the version, a stable instance id, capabilities and upload limits; signed-in apps also get the LAN address and its certificate.
+- **The page bridge.** When Loom runs inside an app, the app defines `window.LoomApp` before the page loads (`web/lib/client/native.ts` is the page's side). Uploads then go to the app after the usual conflict question, downloads to its download manager, and its progress shows as a pill. The page can only hand over files the user picked or dropped, never name a local path. On Windows the bridge is WebView2's message channel, checked against the server's origin; the page gets no other access to the app.
+
+### LAN access
+
+Optional (`./scripts/lan.sh enable`): a small Caddy (`loom-lan`, compose profile `lan`) serves Loom over HTTPS on the local network, with certificates from a private certificate authority the script creates once outside the media folder. loom-web only reads the authority's public certificate, from a read-only volume, and hands it to signed-in apps over the normal address; the apps trust it for the LAN address only, after checking it answers with the same instance id. The LAN listener only passes requests with a device token, marks them (`X-Loom-Via: lan`) so loom-web refuses cookies there, and replaces client-supplied address headers.
+
 ## Live updates
 
 Whenever the index changes, the web app or the scanner publishes a small event on the Postgres channel `loom_events`, saying which folders changed and optionally which files. Examples: an upload finishing, a thumbnail becoming ready, another user renaming something.

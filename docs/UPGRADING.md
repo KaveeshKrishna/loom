@@ -70,6 +70,12 @@ docker compose ps        # wait until loom-web shows (healthy)
 
 ## Version notes
 
+### 2.2.0
+
+No manual steps: `./scripts/update.sh`. A migration adds the devices tables and new upload columns. Optional afterwards: turn on LAN access for the apps with `./scripts/lan.sh enable` ([docs/APPS.md](APPS.md#lan-access-server-side)), and, behind Cloudflare Tunnel, pass on visitors' real addresses ([REVERSE-PROXY.md](REVERSE-PROXY.md#cloudflare-tunnel)).
+
+Rolling back to 2.1 works (the migration only adds things), but paired apps stop working until you update again, and unfinished app uploads start over. If LAN access was on, run `./scripts/lan.sh disable` first, since 2.1's scripts don't know about the `loom-lan` service.
+
 ### 2.1.0
 
 No manual steps and no database migration. Update with `./scripts/update.sh` as usual. New in this release: Windows-style conflict handling, background copies, and crash recovery (see [CHANGELOG.md](../CHANGELOG.md)).

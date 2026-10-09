@@ -109,6 +109,21 @@ Two Cloudflare limits matter, and Loom is built to fit both:
 - **100 MB request bodies.** Uploads go in 32 MB chunks (maximum 95 MB), so any file size works.
 - **100-second request timeout.** Copies run as background jobs and return immediately, so big copies don't hit it.
 
+**Pass on the visitor's real address.** Behind the tunnel, every request reaches your local proxy from `127.0.0.1`, so Loom sees every visitor as the same address. Rate limits on sign-in, pairing and share-link passwords then apply to everyone at once instead of per visitor, and Devices shows `127.0.0.1` as each app's address. Tell Caddy to trust the tunnel's `Cf-Connecting-Ip` header, in the global options at the top of the Caddyfile:
+
+```caddyfile
+{
+    servers {
+        trusted_proxies static 127.0.0.1/32 ::1
+        client_ip_headers Cf-Connecting-Ip X-Forwarded-For
+    }
+}
+```
+
+Only do this when nothing but `cloudflared` can reach that Caddy site (it listens on `127.0.0.1` or a firewalled port); otherwise anyone could claim any address.
+
+**Uploads from home** cross your internet connection twice (out to Cloudflare and back down the tunnel). The [apps](APPS.md) can go straight to the server instead: see [LAN access](APPS.md#lan-access-server-side).
+
 ## Extra authentication in front of Loom
 
 If you put another login layer in front of Loom (Cloudflare Access, Authelia, basic auth), exempt `/s/*` and `/api/share/*` if you want share links to work for people without an account. Everything else can stay behind it.

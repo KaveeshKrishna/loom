@@ -74,6 +74,14 @@ Right-click a file or folder and choose **Share link…** to create a link anyon
 - **Managing links.** **Shared links** in the sidebar lists the links you've made. Delete one there and it stops working immediately. Links keep working when the item is renamed or moved, and pause while it's in Trash.
 - **Who can share.** Sharing is off by default. Once the Owner turns it on in **Settings → Sharing**, any signed-in user can share items they can fully access (a Family user can't share a folder with a denied sub-folder inside it). The Owner can see and delete everyone's links, and turning sharing off disables every link at once.
 
+## Devices and apps
+
+**Devices** (in the sidebar and the user menu) lists the [Loom apps](APPS.md) signed in to your account: their name, app version and when they were last active. Rename or remove them there; removing one signs it out at once.
+
+To add a phone or tablet, choose **Show pairing code** and scan the QR code from the app (or type the code). The code works once and expires after 10 minutes. On Windows, choose **Sign in** in the app instead: it opens Loom and asks you to allow it, after checking the code both show.
+
+The Owner sees everyone's devices and can remove any of them.
+
 ## Trash
 
 Deleted items stay in Trash for 15 days, then they're deleted for good. From Trash you can:

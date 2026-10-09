@@ -22,6 +22,10 @@ It is built around one rule: **your files stay exactly where they are, organized
 - Resumable after a dropped connection, a closed tab, or a power cut. Nothing half-finished ever appears in your folders.
 - An upload counts as done the moment its last byte is safely stored. Thumbnails and previews are generated in the background a few seconds later.
 
+**Apps**
+- [Loom for Windows](docs/APPS.md): Loom in a window, with uploads and downloads that keep going in the background, survive restarts, and go straight to your server over your home network. "Upload to Loom" in File Explorer. An Android app for phones and tablets is in development.
+- Pair an app by approving it in Loom or scanning a code; remove it any time under Devices.
+
 **Organizing**
 - Rename inline (F2), create folders and text files, cut/copy/paste, Move to… and Copy to… with a folder picker.
 - Drag items onto folders, breadcrumbs or the sidebar to move them.
@@ -113,6 +117,7 @@ It shows the new version and its changes and asks before doing anything. Then it
 | Document | What's in it |
 |---|---|
 | [Using Loom](docs/USING.md) | A tour of the features, keyboard shortcuts, sharing, Trash, Owner settings |
+| [The apps](docs/APPS.md) | Loom for Windows: install, pairing, transfers, File Explorer; LAN access |
 | [Installation](docs/INSTALLATION.md) | The installer, manual setup, file permissions, first login |
 | [Configuration](docs/CONFIGURATION.md) | Every environment variable |
 | [How Loom works](docs/ARCHITECTURE.md) | Architecture, background jobs, uploads, crash safety, share links, security |
