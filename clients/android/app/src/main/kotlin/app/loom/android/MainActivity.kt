@@ -208,7 +208,7 @@ class MainActivity : ComponentActivity(), LoomWeb.Events {
                     web?.view?.destroy()
                     web = null
                 }
-                AndroidView({ web!!.view.also { (it.parent as? ViewGroup)?.removeView(it) } }, Modifier.fillMaxSize())
+                AndroidView({ web!!.container.also { (it.parent as? ViewGroup)?.removeView(it) } }, Modifier.fillMaxSize())
             }
             return
         }
@@ -323,7 +323,7 @@ class MainActivity : ComponentActivity(), LoomWeb.Events {
         Row(Modifier.fillMaxSize()) {
             Column(Modifier.weight(1f).fillMaxHeight().statusBarsPadding().navigationBarsPadding().imePadding()) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    AndroidView({ w.view.also { (it.parent as? ViewGroup)?.removeView(it) } }, Modifier.fillMaxSize())
+                    AndroidView({ w.container.also { (it.parent as? ViewGroup)?.removeView(it) } }, Modifier.fillMaxSize())
                     if (loading && !offline) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp))
                     if (offline) Offline(w.server, onReload = { w.reload() }, onTransfers = { screen = Screen.Transfers })
                 }

@@ -44,6 +44,15 @@ class LoomWeb(
 
     val server = app.config.serverUrl!!.trimEnd('/')
     val view = WebView(context)
+
+    /**
+     * What the screen shows: the WebView filling a plain container. A WebView
+     * laid out with "wrap content" (Compose's default) sizes the page's small
+     * viewport (CSS svh, which Loom's layout uses) from its content: 0.
+     */
+    val container = android.widget.FrameLayout(context).apply {
+        addView(view, android.widget.FrameLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT))
+    }
     val bridge = Bridge(view, server) { req -> requests.value = req }
 
     /** The page's last request, for the activity to act on. */
