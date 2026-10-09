@@ -59,6 +59,8 @@ Uninstall Loom from Windows Settings › Apps. That also removes "Upload to Loom
 
 The phone or tablet then appears in Loom under **Devices**, where you can rename or remove it.
 
+Loom shows its pages with Android System WebView, which updates through the Play Store. If it's older than 2023 (version 111), the app says so and links to the update.
+
 ### What it does
 
 - **All of Loom, made for touch.** The app shows your Loom and hands uploads and downloads to its own transfer manager. **New › Upload files** or **Upload folder** opens Android's file or folder picker; folders keep their structure.
