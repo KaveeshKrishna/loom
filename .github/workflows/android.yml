@@ -15,6 +15,7 @@ permissions:
 env:
   GRADLE_VERSION: "8.11.1"
   LOOM_TEST_URL: http://localhost:18085
+  LOOM_TEST_DIR: ${{ github.workspace }}/.loomtest
 
 jobs:
   build:
@@ -34,7 +35,11 @@ jobs:
           gradle-version: ${{ env.GRADLE_VERSION }}
       - name: Start a test Loom
         working-directory: .
-        run: tests/stack/stack.sh up
+        run: |
+          # The containers run as uid 1000; the runner isn't.
+          mkdir -p "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache" && touch "$LOOM_TEST_DIR/.loomtest"
+          sudo chown 1000:1000 "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache"
+          tests/stack/stack.sh up
       - name: Engine tests (against the test Loom)
         run: gradle --no-daemon :engine:test
       - name: Release signing key
@@ -93,7 +98,10 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Start a test Loom
-        run: tests/stack/stack.sh up
+        run: |
+          mkdir -p "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache" && touch "$LOOM_TEST_DIR/.loomtest"
+          sudo chown 1000:1000 "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache"
+          tests/stack/stack.sh up
       - name: Build the app and its tests
         working-directory: clients/android
         run: gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
