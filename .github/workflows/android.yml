@@ -42,7 +42,7 @@ jobs:
             docker pull -q "mirror.gcr.io/library/$img" && docker tag "mirror.gcr.io/library/$img" "$img"
           done
           printf '[registry."docker.io"]\n  mirrors = ["mirror.gcr.io"]\n' > "$RUNNER_TEMP/buildkitd.toml"
-          docker buildx create --name mirrored --driver docker-container --config "$RUNNER_TEMP/buildkitd.toml" --use
+          docker buildx create --name mirrored --driver docker-container --driver-opt image=mirror.gcr.io/moby/buildkit:buildx-stable-1 --config "$RUNNER_TEMP/buildkitd.toml" --use
           export BUILDX_BUILDER=mirrored
           # The containers run as uid 1000; the runner isn't.
           mkdir -p "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache" && touch "$LOOM_TEST_DIR/.loomtest"
@@ -122,7 +122,7 @@ jobs:
             docker pull -q "mirror.gcr.io/library/$img" && docker tag "mirror.gcr.io/library/$img" "$img"
           done
           printf '[registry."docker.io"]\n  mirrors = ["mirror.gcr.io"]\n' > "$RUNNER_TEMP/buildkitd.toml"
-          docker buildx create --name mirrored --driver docker-container --config "$RUNNER_TEMP/buildkitd.toml" --use
+          docker buildx create --name mirrored --driver docker-container --driver-opt image=mirror.gcr.io/moby/buildkit:buildx-stable-1 --config "$RUNNER_TEMP/buildkitd.toml" --use
           export BUILDX_BUILDER=mirrored
           mkdir -p "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache" && touch "$LOOM_TEST_DIR/.loomtest"
           sudo chown 1000:1000 "$LOOM_TEST_DIR/media" "$LOOM_TEST_DIR/cache"
