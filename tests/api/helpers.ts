@@ -153,6 +153,17 @@ export async function pairApp(
   return { app: new Client(t), token: t, deviceId: r.body.device.id };
 }
 
+const shared = new Map<Client, Promise<{ app: Client; token: string; deviceId: string }>>();
+
+/**
+ * One app paired for `user`, reused across tests that don't remove it
+ * (pairing is rate-limited on the server, as it should be).
+ */
+export function sharedApp(user: Client) {
+  if (!shared.has(user)) shared.set(user, pairApp(user, { name: "Shared test app" }));
+  return shared.get(user)!;
+}
+
 // ─── the stack itself ────────────────────────────────────────────────────────
 
 /** docker compose … on the test stack (restart a service, run housekeeping). */

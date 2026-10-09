@@ -148,7 +148,7 @@ export function sessionJson(s: UploadSession) {
     clientRef: s.clientRef,
     chunks: chunkCount(Number(s.size), chunkSizeOf(s)),
     missing: missingChunks(s),
-    windowEnd: s.result ? null : windowEnd(s),
+    windowEnd: s.result || chunkCount(Number(s.size), chunkSizeOf(s)) === 0 ? null : windowEnd(s),
     result: (s.result as FinalizeResult | null) ?? null,
   };
 }

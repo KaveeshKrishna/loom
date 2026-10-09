@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import {
-  Client, owner, familyUser, pairApp, sha256, randomBytes, uniq, sql, closeDb, freshFolder,
+  Client, owner, familyUser, pairApp, sharedApp, sha256, randomBytes, uniq, sql, closeDb, freshFolder,
   mediaFile, mediaExists, mediaList, putBytes, chunkPut, splitChunks, runMaintenance, compose, waitHealthy, MEDIA, BASE,
 } from "./helpers.ts";
 
@@ -112,7 +112,7 @@ test("stream: empty files, Keep both and Replace (the old file goes to Trash)", 
 
 test("chunks: out of order produces the same file; the session lists what's missing", async () => {
   const o = await owner();
-  const { app } = await pairApp(o);
+  const { app } = await sharedApp(o);
   const dir = await freshFolder(o);
   const data = randomBytes(5 * MiB + 1234);
   const s = await createSession(app, { destDir: dir, relativePath: "sub/folder/big.bin", size: data.length, mode: "chunks" });
@@ -147,7 +147,7 @@ test("chunks: out of order produces the same file; the session lists what's miss
 
 test("chunks: an empty file, and a plain in-order upload with keep-both naming", async () => {
   const o = await owner();
-  const { app } = await pairApp(o);
+  const { app } = await sharedApp(o);
   const dir = await freshFolder(o);
   const empty = await chunkUpload(app, dir, "empty.bin", Buffer.alloc(0));
   assert.equal(mediaFile(empty.result.path).length, 0);
@@ -160,7 +160,7 @@ test("chunks: an empty file, and a plain in-order upload with keep-both naming",
 
 test("chunks: a resent chunk is acknowledged without rewriting it", async () => {
   const o = await owner();
-  const { app } = await pairApp(o);
+  const { app } = await sharedApp(o);
   const dir = await freshFolder(o);
   const data = randomBytes(2 * MiB);
   const s = await createSession(app, { destDir: dir, relativePath: "d.bin", size: data.length, mode: "chunks" });
@@ -174,7 +174,7 @@ test("chunks: a resent chunk is acknowledged without rewriting it", async () => 
 
 test("chunks: wrong length, missing or wrong checksum, bad index", async () => {
   const o = await owner();
-  const { app } = await pairApp(o);
+  const { app } = await sharedApp(o);
   const dir = await freshFolder(o);
   const data = randomBytes(2 * MiB);
   const s = await createSession(app, { destDir: dir, relativePath: "v.bin", size: data.length, mode: "chunks" });
@@ -191,7 +191,7 @@ test("chunks: wrong length, missing or wrong checksum, bad index", async () => {
 
 test("chunks: the write window keeps far-ahead chunks out (no huge zero-fill on exFAT)", async () => {
   const o = await owner();
-  const { app } = await pairApp(o);
+  const { app } = await sharedApp(o);
   const dir = await freshFolder(o);
   const size = 80 * MiB;
   const s = await createSession(app, { destDir: dir, relativePath: "w.bin", size, mode: "chunks" });
@@ -205,7 +205,7 @@ test("chunks: the write window keeps far-ahead chunks out (no huge zero-fill on 
 
 test("chunks: a retried create with the same clientRef returns the same session", async () => {
   const o = await owner();
-  const { app } = await pairApp(o);
+  const { app } = await sharedApp(o);
   const dir = await freshFolder(o);
   const ref = uniq("ref-abcdef");
   const body = { destDir: dir, relativePath: "r.bin", size: 100, mode: "chunks", clientRef: ref };
@@ -219,7 +219,7 @@ test("chunks: a retried create with the same clientRef returns the same session"
 
 test("chunks: apps choose their chunk size within limits", async () => {
   const o = await owner();
-  const { app } = await pairApp(o);
+  const { app } = await sharedApp(o);
   const dir = await freshFolder(o);
   const s = await createSession(app, { destDir: dir, relativePath: "c.bin", size: 10 * MiB, mode: "chunks", chunkSize: 4 * MiB });
   assert.equal(s.chunkSize, 4 * MiB);
@@ -230,7 +230,7 @@ test("chunks: apps choose their chunk size within limits", async () => {
 
 test("chunks: parallel chunks are capped per upload; a busy chunk can't be written twice", async () => {
   const o = await owner();
-  const { app } = await pairApp(o);
+  const { app } = await sharedApp(o);
   const dir = await freshFolder(o);
   const data = randomBytes(6 * MiB);
   const s = await createSession(app, { destDir: dir, relativePath: "p.bin", size: data.length, mode: "chunks" });
@@ -266,7 +266,7 @@ test("chunks: parallel chunks are capped per upload; a busy chunk can't be writt
 
 test("chunks: an aborted chunk leaves nothing marked and can be resent", async () => {
   const o = await owner();
-  const { app } = await pairApp(o);
+  const { app } = await sharedApp(o);
   const dir = await freshFolder(o);
   const data = randomBytes(2 * MiB);
   const s = await createSession(app, { destDir: dir, relativePath: "ab.bin", size: data.length, mode: "chunks" });
@@ -296,7 +296,7 @@ test("chunks: an aborted chunk leaves nothing marked and can be resent", async (
 
 test("chunks: the upload survives a server restart and resumes from what's missing", async () => {
   const o = await owner();
-  const { app } = await pairApp(o);
+  const { app } = await sharedApp(o);
   const dir = await freshFolder(o);
   const data = randomBytes(4 * MiB);
   const s = await createSession(app, { destDir: dir, relativePath: "restart.bin", size: data.length, mode: "chunks" });
@@ -316,7 +316,7 @@ test("chunks: the upload survives a server restart and resumes from what's missi
 
 test("browsers and apps each list (and clean up) only their own unfinished uploads", async () => {
   const o = await owner();
-  const { app } = await pairApp(o);
+  const { app } = await sharedApp(o);
   const dir = await freshFolder(o);
   const browserSession = await createSession(o, { destDir: dir, relativePath: "b.bin", size: 10 });
   const appSession = await createSession(app, { destDir: dir, relativePath: "a.bin", size: 10, mode: "chunks" });
@@ -339,7 +339,7 @@ test("browsers and apps each list (and clean up) only their own unfinished uploa
 
 test("app uploads stay resumable for a week, browser ones for a day; housekeeping removes expired ones", async () => {
   const o = await owner();
-  const { app } = await pairApp(o);
+  const { app } = await sharedApp(o);
   const dir = await freshFolder(o);
   const a = await createSession(app, { destDir: dir, relativePath: "ttl-a.bin", size: 10, mode: "chunks" });
   const b = await createSession(o, { destDir: dir, relativePath: "ttl-b.bin", size: 10 });
