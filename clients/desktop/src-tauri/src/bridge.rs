@@ -62,8 +62,9 @@ pub fn init_script(origin: &str, version: &str) -> String {
       apiVersion: 2,
       platform: "windows",
       appVersion: {version:?},
-      capabilities: ["uploads.files", "uploads.picker", "downloads", "transfers", "settings"],
+      capabilities: ["uploads.files", "uploads.dropped", "uploads.picker", "downloads", "transfers", "settings"],
       uploadFiles: (destDir, items, files) => request({{ type: "uploadFiles", destDir, items }}, Array.from(files || [])),
+      uploadDropped: (destDir, items, files) => request({{ type: "uploadDropped", destDir, items }}, Array.from(files || [])),
       pickUpload: (destDir, mode) => request({{ type: "pickUpload", destDir, mode }}),
       download: (req) => request({{ type: "download", items: req.items }}),
       openTransfers: () => request({{ type: "openTransfers" }}),
@@ -85,6 +86,13 @@ pub struct UploadItem {
     pub conflict: String,
 }
 
+/// A file or folder dropped on the page (its path arrives as a WebView2 file object).
+#[derive(Debug, Deserialize)]
+pub struct DroppedItem {
+    pub name: String,
+    pub kind: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct DownloadItem {
     pub path: String,
@@ -98,6 +106,8 @@ pub struct DownloadItem {
 pub enum Message {
     #[serde(rename_all = "camelCase")]
     UploadFiles { dest_dir: String, items: Vec<UploadItem> },
+    #[serde(rename_all = "camelCase")]
+    UploadDropped { dest_dir: String, items: Vec<DroppedItem> },
     #[serde(rename_all = "camelCase")]
     PickUpload { dest_dir: String, mode: String },
     Download { items: Vec<DownloadItem> },
@@ -115,6 +125,7 @@ impl Message {
     pub fn kind(&self) -> &'static str {
         match self {
             Message::UploadFiles { .. } => "uploadFiles",
+            Message::UploadDropped { .. } => "uploadDropped",
             Message::PickUpload { .. } => "pickUpload",
             Message::Download { .. } => "download",
             Message::OpenTransfers => "openTransfers",
@@ -154,6 +165,28 @@ pub fn parse(text: &str) -> Result<(Option<u64>, Message), String> {
     Ok((id, message))
 }
 
+/// How a page load in the main window ended (WebView2's NavigationCompleted).
+#[derive(Debug, Clone)]
+pub struct Navigation {
+    pub url: String,
+    /// The page loaded (false: no connection, DNS, TLS…)
+    pub ok: bool,
+    /// HTTP status, 0 when there was no response
+    pub status: i32,
+    /// Stopped on purpose: a download, or another navigation replaced it
+    pub cancelled: bool,
+}
+
+impl Navigation {
+    /// Did this load fail in a way that means Loom may be down or restarting?
+    pub fn failed(&self) -> bool {
+        if self.cancelled {
+            return false;
+        }
+        !self.ok || self.status >= 500 || self.status == 404
+    }
+}
+
 /// JavaScript that dispatches `name` with `detail` in the page.
 pub fn event_js(name: &str, detail: &serde_json::Value) -> String {
     format!("window.dispatchEvent(new CustomEvent({name:?}, {{ detail: {detail} }}));")
@@ -177,11 +210,18 @@ pub fn same_origin(url: &str, origin: &str) -> bool {
 }
 
 #[cfg(windows)]
-pub fn install(window: &tauri::WebviewWindow, origin: String, tx: tokio::sync::mpsc::UnboundedSender<Incoming>) -> tauri::Result<()> {
+pub fn install(
+    window: &tauri::WebviewWindow,
+    origin: String,
+    tx: tokio::sync::mpsc::UnboundedSender<Incoming>,
+    nav_tx: tokio::sync::mpsc::UnboundedSender<Navigation>,
+) -> tauri::Result<()> {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
-        ICoreWebView2, ICoreWebView2File, ICoreWebView2WebMessageReceivedEventArgs, ICoreWebView2WebMessageReceivedEventArgs2,
+        ICoreWebView2, ICoreWebView2File, ICoreWebView2NavigationCompletedEventArgs, COREWEBVIEW2_WEB_ERROR_STATUS,
+        COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED, ICoreWebView2NavigationCompletedEventArgs2,
+        ICoreWebView2WebMessageReceivedEventArgs, ICoreWebView2WebMessageReceivedEventArgs2,
     };
-    use webview2_com::{take_pwstr, WebMessageReceivedEventHandler};
+    use webview2_com::{take_pwstr, NavigationCompletedEventHandler, WebMessageReceivedEventHandler};
     use windows_core::{Interface, PWSTR};
 
     window.with_webview(move |wv| unsafe {
@@ -245,12 +285,72 @@ pub fn install(window: &tauri::WebviewWindow, origin: String, tx: tokio::sync::m
             Ok(()) => tracing::info!("bridge: listening to the page on {listening_for}"),
             Err(e) => tracing::error!("bridge: can't listen to the page: {e}"),
         }
+        // Page loads: a failed one may mean Loom is down or restarting.
+        let nav = NavigationCompletedEventHandler::create(Box::new(
+            move |sender: Option<ICoreWebView2>, args: Option<ICoreWebView2NavigationCompletedEventArgs>| {
+                let (Some(sender), Some(args)) = (sender, args) else { return Ok(()) };
+                let mut url = PWSTR::null();
+                let url = if sender.Source(&mut url).is_ok() { take_pwstr(url) } else { String::new() };
+                let mut ok = windows_core::BOOL(0);
+                let _ = args.IsSuccess(&mut ok);
+                let mut status = 0i32;
+                if let Ok(args2) = args.cast::<ICoreWebView2NavigationCompletedEventArgs2>() {
+                    let _ = args2.HttpStatusCode(&mut status);
+                }
+                let mut error = COREWEBVIEW2_WEB_ERROR_STATUS::default();
+                let _ = args.WebErrorStatus(&mut error);
+                let cancelled = error == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED;
+                let _ = nav_tx.send(Navigation { url, ok: ok.as_bool(), status, cancelled });
+                Ok(())
+            },
+        ));
+        let mut token = 0i64;
+        if let Err(e) = core.add_NavigationCompleted(&nav, &mut token) {
+            tracing::error!("bridge: can't follow page loads: {e}");
+        }
     })
+}
+
+/// Run a DevTools protocol method in the window (the self-tests use it to
+/// drop files on the page the way Windows does).
+#[cfg(windows)]
+pub fn devtools(window: &tauri::WebviewWindow, method: &str, params: serde_json::Value) -> tokio::sync::oneshot::Receiver<Result<String, String>> {
+    use webview2_com::CallDevToolsProtocolMethodCompletedHandler;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let method = method.to_string();
+    let params = params.to_string();
+    let _ = window.with_webview(move |wv| unsafe {
+        let core = match wv.controller().CoreWebView2() {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tx.send(Err(e.to_string()));
+                return;
+            }
+        };
+        let tx = std::sync::Mutex::new(Some(tx));
+        let done = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |hr, json| {
+            if let Some(tx) = tx.lock().unwrap().take() {
+                let _ = tx.send(if hr.is_ok() { Ok(json) } else { Err(format!("{hr:?} {json}")) });
+            }
+            Ok(())
+        }));
+        let m = windows_core::HSTRING::from(method.as_str());
+        let p = windows_core::HSTRING::from(params.as_str());
+        if let Err(e) = core.CallDevToolsProtocolMethod(&m, &p, &done) {
+            tracing::error!("devtools {method}: {e}");
+        }
+    });
+    rx
 }
 
 /// Other platforms (development builds): no page bridge.
 #[cfg(not(windows))]
-pub fn install(_window: &tauri::WebviewWindow, _origin: String, _tx: tokio::sync::mpsc::UnboundedSender<Incoming>) -> tauri::Result<()> {
+pub fn install(
+    _window: &tauri::WebviewWindow,
+    _origin: String,
+    _tx: tokio::sync::mpsc::UnboundedSender<Incoming>,
+    _nav_tx: tokio::sync::mpsc::UnboundedSender<Navigation>,
+) -> tauri::Result<()> {
     Ok(())
 }
 
@@ -281,6 +381,8 @@ mod tests {
         assert!(matches!(m, Message::PickUpload { ref dest_dir, ref mode } if dest_dir.is_empty() && mode == "folder"));
         let (_, m) = parse(&wire(r#"{"type":"download","items":[{"path":"A/b.txt","name":"b.txt","type":"FILE"}],"id":2}"#)).unwrap();
         assert!(matches!(m, Message::Download { ref items } if items[0].path == "A/b.txt" && items[0].kind == "FILE"));
+        let (_, m) = parse(&wire(r#"{"type":"uploadDropped","destDir":"A","items":[{"name":"Trip","kind":"folder"},{"name":"a.jpg","kind":"file"}],"id":9}"#)).unwrap();
+        assert!(matches!(m, Message::UploadDropped { ref dest_dir, ref items } if dest_dir == "A" && items.len() == 2 && items[0].kind == "folder"));
         assert!(matches!(parse(&wire(r#"{"type":"openTransfers","id":3}"#)).unwrap(), (Some(3), Message::OpenTransfers)));
         assert!(matches!(parse(&wire(r#"{"type":"openSettings","id":4}"#)).unwrap(), (Some(4), Message::OpenSettings)));
         assert!(matches!(parse(&wire(r#"{"type":"setLocation","path":null,"canWrite":false}"#)).unwrap(), (None, Message::SetLocation { path: None, can_write: false })));
@@ -291,6 +393,17 @@ mod tests {
         assert!(matches!(parse(r#"{"type":"ready"}"#).unwrap(), (None, Message::Ready)));
         assert!(parse(&wire(r#"{"type":"rm -rf"}"#)).is_err());
         assert!(parse("not json").is_err());
+    }
+
+    #[test]
+    fn failed_loads() {
+        let n = |ok, status| Navigation { url: "https://loom.example.com/files".into(), ok, status, cancelled: false };
+        assert!(!n(true, 200).failed());
+        assert!(n(false, 0).failed(), "no connection");
+        assert!(n(true, 502).failed() && n(true, 530).failed(), "proxy or tunnel can't reach Loom");
+        assert!(n(true, 404).failed(), "a 404 for a whole page: check Loom");
+        assert!(!n(true, 403).failed());
+        assert!(!Navigation { url: "https://loom.example.com/api/download/zip".into(), ok: false, status: 0, cancelled: true }.failed(), "downloads");
     }
 
     #[test]

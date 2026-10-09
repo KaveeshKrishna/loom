@@ -1,8 +1,9 @@
 /** Settings: account, how transfers behave, downloads, Windows integration. */
 
 import { useEffect, useState } from "react";
-import { FolderOpen, LogOut, FileText } from "lucide-react";
-import { api, type AppSettings, type AppState, type Snapshot } from "../lib/ipc";
+import { FolderOpen, LogOut, FileText, RefreshCw, Download, Loader2 } from "lucide-react";
+import { api, listen, type AppSettings, type AppState, type Snapshot, type UpdateInfo, type UpdateMode, type UpdateStatus } from "../lib/ipc";
+import { ago } from "../lib/format";
 import { Button, Card, Field, Select, Switch } from "../components/ui";
 
 const MB = 1024 * 1024;
@@ -104,8 +105,10 @@ export function SettingsView() {
           </Field>
         </Card>
 
+        <UpdatesCard mode={s.updateMode} onMode={(m) => update({ updateMode: m })} />
+
         <Card title="About">
-          <Field label={`Loom for Windows ${app.version}`} hint={app.serverVersion ? `Connected to Loom ${app.serverVersion}` : undefined}>
+          <Field label={app.serverVersion ? `Connected to Loom ${app.serverVersion}` : "Loom server"} hint={app.serverUrl ?? undefined}>
             <Button size="sm" variant="ghost" onClick={() => api.openLogs()}>
               <FileText size={14} /> Logs
             </Button>
@@ -113,5 +116,79 @@ export function SettingsView() {
         </Card>
       </div>
     </div>
+  );
+}
+
+const UPDATE_MODES: { value: UpdateMode; label: string }[] = [
+  { value: "ask", label: "Download, then ask me" },
+  { value: "auto", label: "Install when idle" },
+  { value: "notify", label: "Only tell me" },
+];
+
+function statusText(st: UpdateStatus): string {
+  switch (st.state) {
+    case "checking":
+      return "Checking for updates…";
+    case "upToDate":
+      return `Up to date · checked ${ago(st.checkedAt * 1000)}`;
+    case "available":
+      return `Loom ${st.version} is available`;
+    case "downloading":
+      return `Downloading Loom ${st.version}… ${st.percent}%`;
+    case "ready":
+      return `Loom ${st.version} is ready to install`;
+    case "installing":
+      return `Installing Loom ${st.version}… Loom restarts by itself`;
+    case "failed":
+      return st.error;
+    default:
+      return "Updates come from Loom's releases on GitHub";
+  }
+}
+
+/** Updates: the version, what's happening, and how updates are installed. */
+function UpdatesCard({ mode, onMode }: { mode: UpdateMode; onMode: (m: UpdateMode) => void }) {
+  const [info, setInfo] = useState<UpdateInfo | null>(null);
+  useEffect(() => {
+    api.updateInfo().then(setInfo);
+    const off = listen<UpdateStatus>("update-status", (status) => setInfo((i) => (i ? { ...i, status } : i)));
+    return () => void off.then((f) => f());
+  }, []);
+  if (!info) return null;
+  const st = info.status;
+  const busy = st.state === "checking" || st.state === "downloading" || st.state === "installing";
+  const notes = (st.state === "ready" || st.state === "available") && st.notes ? st.notes : null;
+  return (
+    <Card title="Updates">
+      <Field label={`Loom for Windows ${info.current}`} hint={<span className={st.state === "failed" ? "text-[hsl(var(--danger))]" : undefined}>{statusText(st)}</span>}>
+        {st.state === "ready" || st.state === "available" ? (
+          <Button size="sm" variant="primary" onClick={() => api.installUpdate()}>
+            <Download size={14} /> {st.state === "ready" ? "Install now" : "Download and install"}
+          </Button>
+        ) : (
+          <Button size="sm" disabled={busy} onClick={async () => setInfo(await api.checkUpdates())}>
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Check now
+          </Button>
+        )}
+      </Field>
+      {notes && (
+        <div className="px-4 py-3">
+          <div className="text-xs font-medium text-[hsl(var(--muted-foreground))]">What’s new</div>
+          <p className="selectable mt-1 whitespace-pre-line text-sm">{notes}</p>
+        </div>
+      )}
+      <Field
+        label="When an update is available"
+        hint={
+          mode === "auto"
+            ? "Installs while nothing is transferring; Loom restarts and transfers continue"
+            : mode === "notify"
+              ? "You choose when to download and install"
+              : "Downloads in the background; you choose when to install"
+        }
+      >
+        <Select label="When an update is available" value={mode} onChange={onMode} options={UPDATE_MODES} />
+      </Field>
+    </Card>
   );
 }

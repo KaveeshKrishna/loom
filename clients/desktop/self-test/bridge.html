@@ -10,7 +10,8 @@
   <title>Loom bridge self-test</title>
 </head>
 <body>
-  <pre id="out"></pre>
+  <div id="drop" style="position: fixed; left: 0; top: 0; right: 0; height: 60vh; border: 2px dashed #888; display: flex; align-items: center; justify-content: center; font: 14px system-ui">Drop here</div>
+  <pre id="out" style="position: fixed; left: 0; right: 0; bottom: 0; height: 35vh; overflow: auto; margin: 0"></pre>
   <script>
     const out = (s) => (document.getElementById("out").textContent += s + "\n");
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -49,6 +50,37 @@
           if (r !== "ok") return fail(name + ": " + r);
         }
         app.setLocation({ path: "Docs", canWrite: true });
+
+        // A real drop (the app sends it through the DevTools protocol): the
+        // top-level items go to the app as File objects, like Loom's page does.
+        const zone = document.getElementById("drop");
+        const dropped = new Promise((resolve) => {
+          zone.addEventListener("dragover", (e) => e.preventDefault());
+          zone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            const items = [];
+            const files = [];
+            for (const i of Array.from(e.dataTransfer.items)) {
+              if (i.kind !== "file") continue;
+              const entry = i.webkitGetAsEntry && i.webkitGetAsEntry();
+              const file = i.getAsFile();
+              if (!file) continue;
+              items.push({ name: (entry && entry.name) || file.name, kind: entry && entry.isDirectory ? "folder" : "file" });
+              files.push(file);
+            }
+            resolve({ items, files });
+          });
+        });
+        const r = zone.getBoundingClientRect();
+        app.log("info", `self-test: drop at ${Math.round(r.left + r.width / 2)},${Math.round(r.top + r.height / 2)}`);
+        const drop = await Promise.race([dropped, wait(20000).then(() => null)]);
+        if (!drop) return fail("nothing was dropped");
+        out("dropped: " + JSON.stringify(drop.items));
+        if (drop.files.length !== 2) return fail("expected 2 dropped items, got " + drop.files.length);
+        const d = await within(app.uploadDropped("Drops", drop.items, drop.files), 10000);
+        out("uploadDropped: " + d);
+        if (d !== "ok") return fail("uploadDropped: " + d);
+
         app.log("info", "self-test: pass");
         out("done");
       } catch (e) {

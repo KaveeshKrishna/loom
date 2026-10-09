@@ -7,9 +7,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowDownToLine, ArrowUpFromLine, ArrowUpDown, Pause, Play, X, RotateCcw, ChevronRight, CheckCircle2, AlertTriangle,
-  Settings as SettingsIcon, FolderOpen, ExternalLink, Wifi, CloudOff, LogIn, HardDrive, Upload, FolderUp, MoreHorizontal, Trash2, FileWarning,
+  Settings as SettingsIcon, FolderOpen, ExternalLink, Wifi, CloudOff, LogIn, HardDrive, Upload, FolderUp, MoreHorizontal, Trash2, FileWarning, Download,
 } from "lucide-react";
-import { api, listen, type Batch, type Item, type Snapshot } from "../lib/ipc";
+import { api, listen, type Batch, type Item, type Snapshot, type UpdateStatus } from "../lib/ipc";
 import { bytes, speed, timeLeft, count, ago, fileName, folderLabel } from "../lib/format";
 import { Button, IconButton, Progress, cx } from "../components/ui";
 import { ConflictDialog } from "./ConflictDialog";
@@ -108,6 +108,7 @@ export function TransfersWindow() {
         ) : (
           <>
             <Header snap={snap} filter={filter} onClearFinished={async () => { await api.clearFinished(); refresh(); }} />
+            <UpdateBanner />
             <Banners snap={snap} />
             <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
               {shown.length === 0 ? (
@@ -218,6 +219,25 @@ function MenuItem({ icon, label, onClick }: { icon: React.ReactNode; label: stri
   );
 }
 
+/** An update that's downloaded and waiting ("download, then ask me"). */
+function UpdateBanner() {
+  const [ready, setReady] = useState<{ version: string } | null>(null);
+  const [later, setLater] = useState(false);
+  useEffect(() => {
+    const apply = (st: UpdateStatus) => setReady(st.state === "ready" ? { version: st.version } : null);
+    api.updateInfo().then((i) => i.mode !== "auto" && apply(i.status));
+    const off = listen<UpdateStatus>("update-status", apply);
+    return () => void off.then((f) => f());
+  }, []);
+  if (!ready || later) return null;
+  return (
+    <Banner tone="primary" icon={<Download size={16} />} title={`Loom ${ready.version} is ready to install`} body="Loom restarts in a few seconds; transfers continue where they were.">
+      <Button size="sm" variant="ghost" onClick={() => setLater(true)}>Later</Button>
+      <Button size="sm" variant="primary" onClick={() => api.installUpdate()}>Install now</Button>
+    </Banner>
+  );
+}
+
 function Banners({ snap }: { snap: Snapshot }) {
   if (snap.signedOut) {
     return (
@@ -242,7 +262,7 @@ function Banners({ snap }: { snap: Snapshot }) {
   return null;
 }
 
-function Banner({ tone, icon, title, body, children }: { tone: "danger" | "warning" | "muted"; icon: React.ReactNode; title: string; body: string; children?: React.ReactNode }) {
+function Banner({ tone, icon, title, body, children }: { tone: "danger" | "warning" | "muted" | "primary"; icon: React.ReactNode; title: string; body: string; children?: React.ReactNode }) {
   return (
     <div
       role="status"
@@ -250,10 +270,11 @@ function Banner({ tone, icon, title, body, children }: { tone: "danger" | "warni
         "mx-4 mb-3 flex items-center gap-3 rounded-lg border px-3 py-2.5",
         tone === "danger" && "border-[hsl(var(--danger)/0.35)] bg-[hsl(var(--danger)/0.07)]",
         tone === "warning" && "border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning)/0.08)]",
-        tone === "muted" && "border-[hsl(var(--border))] bg-[hsl(var(--muted))]"
+        tone === "muted" && "border-[hsl(var(--border))] bg-[hsl(var(--muted))]",
+        tone === "primary" && "border-[hsl(var(--primary)/0.3)] bg-[hsl(var(--primary)/0.07)]"
       )}
     >
-      <span className={cx(tone === "danger" && "text-[hsl(var(--danger))]", tone === "warning" && "text-[hsl(var(--warning))]", tone === "muted" && "text-[hsl(var(--muted-foreground))]")}>{icon}</span>
+      <span className={cx(tone === "danger" && "text-[hsl(var(--danger))]", tone === "warning" && "text-[hsl(var(--warning))]", tone === "muted" && "text-[hsl(var(--muted-foreground))]", tone === "primary" && "text-[hsl(var(--primary))]")}>{icon}</span>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{title}</p>
         <p className="text-xs text-[hsl(var(--muted-foreground))]">{body}</p>

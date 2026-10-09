@@ -24,7 +24,10 @@ let settings: AppSettings = {
   sendTo: true,
   downloadDir: "C:\\Users\\Alex\\Downloads\\Loom",
   askDownloadDir: false,
+  updateMode: "ask",
 };
+
+let serverChecks = 0;
 
 const batches: Batch[] =
   scenario === "empty"
@@ -162,6 +165,19 @@ export async function invoke<T>(cmd: string, args: Record<string, unknown> = {})
         return ["Photos/2026", "Documents/Scans", "Videos"];
       case "choose_download_dir":
         return "D:\\Loom downloads";
+      case "server_status":
+        // The offline screen: Loom answers on the third check.
+        return ++serverChecks >= 3;
+      case "update_info":
+      case "check_updates":
+        return {
+          current: "1.1.0",
+          mode: settings.updateMode,
+          status:
+            scenario === "update"
+              ? { state: "ready", version: "1.2.0", notes: "Faster folder uploads and a floating progress bar." }
+              : { state: "upToDate", checkedAt: Math.floor(now / 1000) - 3600 },
+        };
       default:
         return null;
     }

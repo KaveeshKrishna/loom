@@ -6,8 +6,10 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+/// Settings from older versions lack newer fields: those get their defaults
+/// (never a failed load, which would forget the pairing).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub parallel_files: usize,
     pub parallel_chunks: usize,
@@ -19,6 +21,8 @@ pub struct AppSettings {
     pub send_to: bool,
     pub download_dir: String,
     pub ask_download_dir: bool,
+    /// "ask" (download, then ask to install), "auto" (install when idle) or "notify"
+    pub update_mode: String,
 }
 
 impl Default for AppSettings {
@@ -35,6 +39,7 @@ impl Default for AppSettings {
             send_to: true,
             download_dir: downloads.to_string_lossy().into_owned(),
             ask_download_dir: false,
+            update_mode: "ask".into(),
         }
     }
 }
@@ -59,6 +64,8 @@ pub struct Config {
     /// Remembered so the LAN address works even before the first refresh.
     pub instance_id: Option<String>,
     pub lan: Option<loom_engine::LanConfig>,
+    /// Where the floating mini Transfers bar was last put (logical pixels)
+    pub mini_position: Option<(f64, f64)>,
 }
 
 impl Config {
@@ -141,5 +148,30 @@ pub mod secret {
     #[cfg(not(windows))]
     pub fn delete(server: &str) {
         let _ = std::fs::remove_file(file(server));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn older_configs_keep_their_pairing() {
+        // A 1.0 config: no updateMode, no miniPosition.
+        let dir = std::env::temp_dir().join(format!("loom-config-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        std::fs::write(
+            &path,
+            r#"{"serverUrl":"https://loom.example.com","deviceId":"dev1","deviceName":"PC","settings":{"parallelFiles":4,"parallelChunks":2,"speedLimit":0,"useLan":true,"keepAwake":true,"startAtLogin":true,"explorerMenu":true,"sendTo":true,"downloadDir":"D:\\Loom","askDownloadDir":false}}"#,
+        )
+        .unwrap();
+        let c = Config::load(&path);
+        assert_eq!(c.server_url.as_deref(), Some("https://loom.example.com"));
+        assert_eq!(c.device_id.as_deref(), Some("dev1"));
+        assert_eq!(c.settings.parallel_files, 4);
+        assert_eq!(c.settings.update_mode, "ask");
+        assert!(c.mini_position.is_none());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

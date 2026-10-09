@@ -95,6 +95,26 @@ export interface AppSettings {
   sendTo: boolean;
   downloadDir: string;
   askDownloadDir: boolean;
+  /** "ask": download, then ask to install · "auto": install when idle · "notify": only tell */
+  updateMode: UpdateMode;
+}
+
+export type UpdateMode = "ask" | "auto" | "notify";
+
+export type UpdateStatus =
+  | { state: "idle" }
+  | { state: "checking" }
+  | { state: "upToDate"; checkedAt: number }
+  | { state: "available"; version: string; notes: string }
+  | { state: "downloading"; version: string; percent: number }
+  | { state: "ready"; version: string; notes: string }
+  | { state: "installing"; version: string }
+  | { state: "failed"; error: string };
+
+export interface UpdateInfo {
+  current: string;
+  mode: UpdateMode;
+  status: UpdateStatus;
 }
 
 export interface FolderEntry {
@@ -186,4 +206,10 @@ export const api = {
   openLogs: () => invoke<void>("open_logs"),
   closeWindow: () => invoke<void>("close_window"),
   takeReview: () => invoke<number | null>("take_review"),
+  serverStatus: () => invoke<boolean>("server_status"),
+  reloadLoom: () => invoke<void>("reload_loom"),
+  closeMini: () => invoke<void>("close_mini"),
+  updateInfo: () => invoke<UpdateInfo>("update_info"),
+  checkUpdates: () => invoke<UpdateInfo>("check_updates"),
+  installUpdate: () => invoke<void>("install_update"),
 };

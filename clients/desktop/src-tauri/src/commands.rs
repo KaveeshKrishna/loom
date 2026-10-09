@@ -25,7 +25,8 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
     tauri::generate_handler![
         app_state, check_server, start_pairing, cancel_pairing, sign_out, snapshot, batches, items, conflicts, decide, pause, resume, cancel, retry,
         remove_batch, clear_finished, pick_upload, list_folder, create_folder, pending_upload, confirm_upload, cancel_pending_upload,
-        recent_destinations, settings, set_settings, choose_download_dir, open_main, open_transfers, reveal, open_logs, close_window, take_review
+        recent_destinations, settings, set_settings, choose_download_dir, open_main, open_transfers, reveal, open_logs, close_window, take_review,
+        server_status, reload_loom, close_mini, update_info, check_updates, install_update
     ]
 }
 
@@ -515,6 +516,47 @@ fn open_logs(a: State<AppRef>) -> R<()> {
     a.handle.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Is Loom answering? (the offline screen asks every few seconds)
+#[tauri::command]
+async fn server_status(a: State<'_, AppRef>) -> R<bool> {
+    let Some(server) = a.server() else { return Ok(false) };
+    Ok(crate::main_window::healthy(&server).await)
+}
+
+/// Load Loom in the main window again (offline screen, tray).
+#[tauri::command]
+fn reload_loom(a: State<AppRef>) {
+    crate::reload_main(a.inner(), None);
+}
+
+/// The mini bar's Close: it and the minimized Transfers window go away.
+#[tauri::command]
+fn close_mini(a: State<AppRef>) {
+    crate::close_mini(a.inner());
+    if let Some(w) = a.handle.get_webview_window("transfers") {
+        if !w.is_visible().unwrap_or(true) {
+            let _ = w.destroy();
+        }
+    }
+}
+
+#[tauri::command]
+fn update_info(a: State<AppRef>) -> crate::updates::UpdateInfo {
+    crate::updates::info(a.inner())
+}
+
+#[tauri::command]
+async fn check_updates(a: State<'_, AppRef>) -> R<crate::updates::UpdateInfo> {
+    let a = a.inner().clone();
+    crate::updates::check(&a, true).await;
+    Ok(crate::updates::info(&a))
+}
+
+#[tauri::command]
+async fn install_update(a: State<'_, AppRef>) -> R<()> {
+    crate::updates::install(a.inner()).await
+}
+
 /// Close the calling window (sign-in "Open Loom" also shows Loom).
 #[tauri::command]
 fn close_window(a: State<AppRef>, window: tauri::Window) {
@@ -532,7 +574,7 @@ mod tests {
     fn server_addresses() {
         assert_eq!(normalize_url("loom.example.com").as_deref(), Some("https://loom.example.com"));
         assert_eq!(normalize_url(" https://loom.example.com/files/ ").as_deref(), Some("https://loom.example.com"));
-        assert_eq!(normalize_url("http://192.168.1.43:8085").as_deref(), Some("http://192.168.1.43:8085"));
+        assert_eq!(normalize_url("http://192.168.0.10:8085").as_deref(), Some("http://192.168.0.10:8085"));
         assert_eq!(normalize_url("ftp://x"), None);
         assert_eq!(normalize_url("https://"), None);
     }

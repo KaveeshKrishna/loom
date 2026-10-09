@@ -40,7 +40,20 @@ jobs:
       - name: Unit tests
         run: cargo test --workspace
       - name: Build the installer
-        run: npx tauri build --bundles nsis
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if ($env:TAURI_SIGNING_PRIVATE_KEY) {
+            # Signed update package (.sig) for the app's self-updates.
+            '{"bundle":{"createUpdaterArtifacts":true}}' | Set-Content "$env:RUNNER_TEMP/signed.json" -Encoding utf8NoBOM
+            npx tauri build --bundles nsis --config "$env:RUNNER_TEMP/signed.json"
+          } else {
+            Write-Host "No updater signing key (e.g. a fork or a pull request): building without update packages."
+            npx tauri build --bundles nsis
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Installer runs silently and installs the app
         shell: pwsh
         run: |
@@ -49,7 +62,7 @@ jobs:
           $exe = Join-Path $env:LOCALAPPDATA "Loom/Loom.exe"
           if (-not (Test-Path $exe)) { Get-ChildItem -Recurse $env:LOCALAPPDATA -Filter Loom.exe | Select-Object -First 5; throw "Loom.exe not installed" }
           Write-Host "Installed: $exe"
-      - name: Loom's page and the app talk to each other (real WebView2)
+      - name: Loom's page and the app talk to each other, and drops arrive (real WebView2)
         shell: pwsh
         run: |
           $page = Resolve-Path self-test
@@ -59,36 +72,155 @@ jobs:
           $exe = Join-Path $env:LOCALAPPDATA "Loom/Loom.exe"
           $app = Start-Process $exe -ArgumentList "--bridge-self-test", "http://127.0.0.1:8123/bridge.html", "`"$report`"" -PassThru
           $null = $app.Handle  # without this, ExitCode can come back empty
-          $finished = $app.WaitForExit(120000)
+          $finished = $app.WaitForExit(150000)
           if (-not $finished) { $app.Kill() }
           Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
           if (Test-Path $report) { Get-Content $report } else { Write-Host "(no report)" }
-          $logs = Join-Path $env:LOCALAPPDATA "app.loom.desktop/logs"
-          if (Test-Path $logs) { Get-ChildItem $logs | ForEach-Object { Write-Host "--- $($_.Name)"; Get-Content $_.FullName } }
           $passed = $finished -and $app.ExitCode -eq 0 -and (Test-Path $report) -and (Select-String -Path $report -Pattern '^PASS$' -Quiet)
-          if (-not $passed) { throw "The bridge self-test failed (exit code $($app.ExitCode))" }
+          if (-not $passed) {
+            $logs = Join-Path $env:LOCALAPPDATA "app.loom.desktop/logs"
+            if (Test-Path $logs) { Get-ChildItem $logs | ForEach-Object { Write-Host "--- $($_.Name)"; Get-Content $_.FullName -Tail 80 } }
+            throw "The bridge self-test failed (exit code $($app.ExitCode))"
+          }
+      - name: When Loom is down, the window says so and comes back by itself
+        shell: pwsh
+        run: |
+          $server = Start-Process python -ArgumentList "self-test/server.py", "8124" -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 2
+          $report = Join-Path $env:RUNNER_TEMP "offline-self-test.txt"
+          $exe = Join-Path $env:LOCALAPPDATA "Loom/Loom.exe"
+          $app = Start-Process $exe -ArgumentList "--offline-self-test", "http://127.0.0.1:8124", "`"$report`"" -PassThru
+          $null = $app.Handle
+          $finished = $app.WaitForExit(150000)
+          if (-not $finished) { $app.Kill() }
+          Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
+          if (Test-Path $report) { Get-Content $report } else { Write-Host "(no report)" }
+          $passed = $finished -and $app.ExitCode -eq 0 -and (Test-Path $report) -and (Select-String -Path $report -Pattern '^PASS$' -Quiet)
+          if (-not $passed) {
+            $logs = Join-Path $env:LOCALAPPDATA "app.loom.desktop/logs"
+            if (Test-Path $logs) { Get-ChildItem $logs | ForEach-Object { Write-Host "--- $($_.Name)"; Get-Content $_.FullName -Tail 80 } }
+            throw "The offline self-test failed (exit code $($app.ExitCode))"
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: loom-windows-installer
-          path: clients/desktop/target/release/bundle/nsis/*-setup.exe
+          path: |
+            clients/desktop/target/release/bundle/nsis/*-setup.exe
+            clients/desktop/target/release/bundle/nsis/*-setup.exe.sig
           if-no-files-found: error
+
+  # An installed app finds a newer signed build, downloads it, checks its
+  # signature, installs it and restarts as the new version. Runs for releases
+  # and on demand (two extra builds), when the signing key is available.
+  update:
+    name: Self-update round trip
+    if: startsWith(github.ref, 'refs/tags/desktop-v') || github.event_name == 'workflow_dispatch'
+    needs: windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: clients/desktop
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: clients/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/desktop
+      - run: npm ci
+      - name: Build this version and a newer one, both looking for updates on this machine
+        shell: pwsh
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "The TAURI_SIGNING_PRIVATE_KEY secret isn't set" }
+          $updater = @{ updater = @{ endpoints = @("http://127.0.0.1:8125/windows.json"); dangerousInsecureTransportProtocol = $true } }
+          @{ plugins = $updater } | ConvertTo-Json -Depth 6 | Set-Content "$env:RUNNER_TEMP/current.json" -Encoding utf8NoBOM
+          @{ version = "9.9.9"; bundle = @{ createUpdaterArtifacts = $true }; plugins = $updater } | ConvertTo-Json -Depth 6 | Set-Content "$env:RUNNER_TEMP/next.json" -Encoding utf8NoBOM
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/updates" | Out-Null
+          npx tauri build --bundles nsis --config "$env:RUNNER_TEMP/current.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item (Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1).FullName "$env:RUNNER_TEMP/updates/current-setup.exe"
+          npx tauri build --bundles nsis --config "$env:RUNNER_TEMP/next.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $next = Get-ChildItem target/release/bundle/nsis/*9.9.9*-setup.exe | Select-Object -First 1
+          Copy-Item $next.FullName "$env:RUNNER_TEMP/updates/next-setup.exe"
+          $manifest = @{
+            version = "9.9.9"
+            notes = "Round-trip test"
+            pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = @{ "windows-x86_64" = @{ signature = (Get-Content "$($next.FullName).sig" -Raw).Trim(); url = "http://127.0.0.1:8125/next-setup.exe" } }
+          }
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content "$env:RUNNER_TEMP/updates/windows.json" -Encoding utf8
+          Get-Content "$env:RUNNER_TEMP/updates/windows.json"
+      - name: The installed app updates itself and restarts as the new version
+        shell: pwsh
+        run: |
+          $server = Start-Process python -ArgumentList "-m", "http.server", "8125", "--bind", "127.0.0.1", "--directory", "$env:RUNNER_TEMP/updates" -PassThru -WindowStyle Hidden
+          Start-Process "$env:RUNNER_TEMP/updates/current-setup.exe" -ArgumentList "/S" -Wait
+          $exe = Join-Path $env:LOCALAPPDATA "Loom/Loom.exe"
+          Write-Host "Installed: $((Get-Item $exe).VersionInfo.ProductVersion)"
+          $report = Join-Path $env:RUNNER_TEMP "update-self-test.txt"
+          $app = Start-Process $exe -ArgumentList "--update-self-test", "-", "`"$report`"" -PassThru
+          $app.WaitForExit(180000) | Out-Null
+          if (Test-Path $report) { Get-Content $report }
+          $deadline = (Get-Date).AddMinutes(4)
+          do {
+            Start-Sleep -Seconds 5
+            $version = (Get-Item $exe -ErrorAction SilentlyContinue).VersionInfo.ProductVersion
+            $running = Get-Process Loom -ErrorAction SilentlyContinue
+          } until (($version -eq "9.9.9" -and $running) -or (Get-Date) -gt $deadline)
+          Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
+          Get-Process Loom -ErrorAction SilentlyContinue | Stop-Process -Force
+          Write-Host "Now installed: $version; restarted: $([bool]$running)"
+          if ($version -ne "9.9.9") {
+            $logs = Join-Path $env:LOCALAPPDATA "app.loom.desktop/logs"
+            if (Test-Path $logs) { Get-ChildItem $logs | ForEach-Object { Write-Host "--- $($_.Name)"; Get-Content $_.FullName -Tail 60 } }
+            throw "The app didn't update itself"
+          }
+          if (-not $running) { throw "The app updated but didn't start again" }
 
   release:
     name: Publish the release
     if: startsWith(github.ref, 'refs/tags/desktop-v')
-    needs: windows
+    needs: [windows, update]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: loom-windows-installer
           path: dist
-      - name: Create the GitHub release
+      - name: Create the GitHub release and point the apps' update check at it
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          notes="Download the setup file below and run it. Windows may warn about an unknown publisher the first time (the app isn't code-signed): choose More info, then Run anyway."
-          gh release create "$TAG" dist/*.exe --repo "$GITHUB_REPOSITORY" --title "Loom for Windows ${TAG#desktop-v}" --notes "$notes"
+          set -euo pipefail
+          version="${TAG#desktop-v}"
+          conf_version="$(jq -r .version clients/desktop/src-tauri/tauri.conf.json)"
+          [ "$version" = "$conf_version" ] || { echo "Tag $TAG doesn't match tauri.conf.json ($conf_version)"; exit 1; }
+          setup="$(ls dist/*-setup.exe | head -1)"
+          [ -f "$setup.sig" ] || { echo "No update signature: is the TAURI_SIGNING_PRIVATE_KEY secret set?"; exit 1; }
+          # Release notes: this version's section of clients/desktop/CHANGELOG.md.
+          awk -v v="## $version" '$0==v{on=1;next} /^## /{on=0} on' clients/desktop/CHANGELOG.md > notes.md
+          { cat notes.md; echo; echo "Download the setup file below and run it. Windows may warn about an unknown publisher the first time (the app isn't code-signed): choose More info, then Run anyway. Installed copies update themselves."; } > release.md
+          gh release create "$TAG" "$setup" "$setup.sig" --repo "$GITHUB_REPOSITORY" --title "Loom for Windows $version" --notes-file release.md
+          name="$(basename "$setup")"
+          jq -n --arg v "$version" --rawfile notes notes.md --arg sig "$(cat "$setup.sig")" \
+            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$name" \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{version: $v, notes: $notes, pub_date: $date, platforms: {"windows-x86_64": {signature: $sig, url: $url}}}' > windows.json
+          cat windows.json
+          # The rolling "updates" release holds the manifests the apps check.
+          gh release view updates --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            gh release create updates --repo "$GITHUB_REPOSITORY" --prerelease --title "Update manifests" \
+              --notes "Files the Loom apps read to find their updates. Nothing to download here: get the apps from their own releases."
+          gh release upload updates windows.json --clobber --repo "$GITHUB_REPOSITORY"

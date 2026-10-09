@@ -1,0 +1,17 @@
+<!doctype html>
+<!-- Stands in for Loom's page in the offline self-test (served by server.py once it's "up"). -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Loom (self-test)</title>
+</head>
+<body>
+  <p>Loom is back.</p>
+  <script>
+    (async () => {
+      for (let i = 0; i < 200 && !window.LoomApp; i++) await new Promise((r) => setTimeout(r, 50));
+      if (window.LoomApp) window.LoomApp.ready();
+    })();
+  </script>
+</body>
+</html>

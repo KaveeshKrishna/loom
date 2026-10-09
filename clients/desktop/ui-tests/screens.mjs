@@ -14,6 +14,10 @@ const shots = [
   ["onboarding", "?scenario=onboarding#/onboarding", 460, 620],
   ["destination", "?scenario=busy#/destination", 560, 640],
   ["offline", "?scenario=busy#/offline?server=https%3A%2F%2Floom.example.com", 1000, 660],
+  ["mini-busy", "?scenario=busy#/mini", 360, 76],
+  ["mini-offline", "?scenario=offline#/mini", 360, 76],
+  ["settings-update", "?scenario=update#/settings", 1000, 980],
+  ["transfers-update", "?scenario=update#/transfers", 1000, 660],
 ];
 
 fs.mkdirSync("ui-tests/out", { recursive: true });
@@ -29,6 +33,15 @@ for (const scheme of ["light", "dark"]) {
     if (errors.length) console.log(name, scheme, "ERRORS:", errors);
     await page.close();
   }
+}
+// The settings page scrolled to Updates.
+{
+  const p = await browser.newPage({ viewport: { width: 1000, height: 760 }, deviceScaleFactor: 1.25 });
+  await p.goto(BASE + "/?scenario=update#/settings");
+  await p.waitForTimeout(600);
+  await p.getByText("When an update is available").scrollIntoViewIfNeeded();
+  await p.screenshot({ path: "ui-tests/out/settings-updates-light.png" });
+  await p.close();
 }
 // Interactions worth seeing.
 const page = await browser.newPage({ viewport: { width: 1000, height: 660 }, deviceScaleFactor: 1.25 });
