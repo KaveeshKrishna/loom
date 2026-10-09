@@ -39,11 +39,20 @@ export function TransfersWindow() {
   useEffect(() => {
     refresh();
     api.snapshot().then(setSnap);
+    // Name conflicts found for a new upload: ask right away.
+    const review = () =>
+      api.takeReview().then((id) => {
+        if (id == null) return;
+        setView("transfers");
+        setReviewing(id);
+      });
+    review();
     const t = setInterval(refresh, 1000);
     const offs = [
       listen<Snapshot>("snapshot", setSnap),
       listen("engine-event", () => refresh()),
       listen<string>("navigate", (to) => setView(to === "settings" ? "settings" : "transfers")),
+      listen("review", () => review()),
     ];
     return () => {
       clearInterval(t);

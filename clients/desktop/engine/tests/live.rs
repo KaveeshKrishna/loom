@@ -241,6 +241,74 @@ async fn uploads_a_folder_with_its_structure_and_dates() {
     e.shutdown().await;
 }
 
+/// GET a JSON API as the device.
+async fn get_json(base: &str, token: &str, path: &str) -> serde_json::Value {
+    let r = reqwest::Client::new().get(format!("{base}{path}")).bearer_auth(token).send().await.unwrap();
+    assert!(r.status().is_success(), "{path}: {}", r.status());
+    r.json().await.unwrap()
+}
+
+fn query(s: &str) -> String {
+    url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn app_uploads_get_thumbnails_and_show_up_in_listings_and_search() {
+    let base = need_server!();
+    let (token, _, cookie) = pair(&base).await;
+    let dest = uniq("eng-scan");
+    mkdir(&base, &cookie, &dest).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("Holiday");
+    std::fs::create_dir_all(root.join("day 2/empty")).unwrap();
+    // The photo gets a unique tail (ignored by decoders) so the server can't
+    // reuse a thumbnail from an earlier run.
+    let mut photo = include_bytes!("fixtures/photo.jpg").to_vec();
+    photo.extend_from_slice(&random(64));
+    let photo_name = format!("{}.jpg", uniq("beach"));
+    std::fs::write(root.join(&photo_name), &photo).unwrap();
+    std::fs::write(root.join("day 2/clip.mp4"), include_bytes!("fixtures/clip.mp4")).unwrap();
+    let e = engine_at(&base, &token, &tmp.path().join("q.db"), settings()).await;
+    let id = e.upload(UploadRequest { dest_dir: dest.clone(), sources: vec![file_src(&root)], on_conflict: OnConflict::Ask, title: None }).await.unwrap();
+    let b = wait_batch(&e, id, 120).await;
+    assert_eq!((b.files_done, b.files_failed), (2, 0), "{b:?}");
+    e.shutdown().await;
+
+    // Listings: the folder structure, including the empty folder.
+    let top = get_json(&base, &token, &format!("/api/files?path={}", query(&format!("{dest}/Holiday")))).await;
+    let names: Vec<&str> = top["children"].as_array().unwrap().iter().map(|n| n["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"day 2") && names.contains(&photo_name.as_str()), "{names:?}");
+    let day2 = get_json(&base, &token, &format!("/api/files?path={}", query(&format!("{dest}/Holiday/day 2")))).await;
+    let names: Vec<&str> = day2["children"].as_array().unwrap().iter().map(|n| n["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"empty") && names.contains(&"clip.mp4"), "{names:?}");
+
+    // The scanner makes a thumbnail for the photo and a poster for the video.
+    let thumb_of = |listing: &serde_json::Value, name: &str| -> Option<String> {
+        listing["children"].as_array()?.iter().find(|n| n["name"] == name)?["contentIdentity"]["thumbnail"]["cachePath"].as_str().map(String::from)
+    };
+    let until = Instant::now() + Duration::from_secs(90);
+    let (photo_thumb, poster) = loop {
+        let top = get_json(&base, &token, &format!("/api/files?path={}", query(&format!("{dest}/Holiday")))).await;
+        let day2 = get_json(&base, &token, &format!("/api/files?path={}", query(&format!("{dest}/Holiday/day 2")))).await;
+        if let (Some(a), Some(b)) = (thumb_of(&top, &photo_name), thumb_of(&day2, "clip.mp4")) {
+            break (a, b);
+        }
+        assert!(Instant::now() < until, "no thumbnails after 90 s: {top} {day2}");
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    for cache_path in [photo_thumb, poster] {
+        let r = reqwest::Client::new().get(format!("{base}/api/cache/{cache_path}")).bearer_auth(&token).send().await.unwrap();
+        assert!(r.status().is_success(), "{cache_path}: {}", r.status());
+        assert!(r.headers()["content-type"].to_str().unwrap().starts_with("image/"), "{cache_path}");
+        assert!(r.bytes().await.unwrap().len() > 100);
+    }
+
+    // Search finds it.
+    let stem = photo_name.trim_end_matches(".jpg");
+    let found = get_json(&base, &token, &format!("/api/search?q={}", query(stem))).await;
+    assert!(found["results"].as_array().unwrap().iter().any(|n| n["name"] == photo_name.as_str()), "{found}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn name_conflicts_ask_then_replace_skip_or_keep_both() {
     let base = need_server!();

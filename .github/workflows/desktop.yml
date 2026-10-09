@@ -49,6 +49,24 @@ jobs:
           $exe = Join-Path $env:LOCALAPPDATA "Loom/Loom.exe"
           if (-not (Test-Path $exe)) { Get-ChildItem -Recurse $env:LOCALAPPDATA -Filter Loom.exe | Select-Object -First 5; throw "Loom.exe not installed" }
           Write-Host "Installed: $exe"
+      - name: Loom's page and the app talk to each other (real WebView2)
+        shell: pwsh
+        run: |
+          $page = Resolve-Path self-test
+          $server = Start-Process python -ArgumentList "-m", "http.server", "8123", "--bind", "127.0.0.1", "--directory", "$page" -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 2
+          $report = Join-Path $env:RUNNER_TEMP "bridge-self-test.txt"
+          $exe = Join-Path $env:LOCALAPPDATA "Loom/Loom.exe"
+          $app = Start-Process $exe -ArgumentList "--bridge-self-test", "http://127.0.0.1:8123/bridge.html", "`"$report`"" -PassThru
+          $null = $app.Handle  # without this, ExitCode can come back empty
+          $finished = $app.WaitForExit(120000)
+          if (-not $finished) { $app.Kill() }
+          Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
+          if (Test-Path $report) { Get-Content $report } else { Write-Host "(no report)" }
+          $logs = Join-Path $env:LOCALAPPDATA "app.loom.desktop/logs"
+          if (Test-Path $logs) { Get-ChildItem $logs | ForEach-Object { Write-Host "--- $($_.Name)"; Get-Content $_.FullName } }
+          $passed = $finished -and $app.ExitCode -eq 0 -and (Test-Path $report) -and (Select-String -Path $report -Pattern '^PASS$' -Quiet)
+          if (-not $passed) { throw "The bridge self-test failed (exit code $($app.ExitCode))" }
       - uses: actions/upload-artifact@v4
         with:
           name: loom-windows-installer

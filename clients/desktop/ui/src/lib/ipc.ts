@@ -185,4 +185,5 @@ export const api = {
   reveal: (path: string) => invoke<void>("reveal", { path }),
   openLogs: () => invoke<void>("open_logs"),
   closeWindow: () => invoke<void>("close_window"),
+  takeReview: () => invoke<number | null>("take_review"),
 };

@@ -11,6 +11,7 @@
 mod bridge;
 mod commands;
 mod config;
+mod self_test;
 mod windows_shell;
 
 use std::path::PathBuf;
@@ -18,7 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use loom_engine::{Engine, Event, OnConflict, ServerConfig, Snapshot, UploadRequest, UploadSource};
+use loom_engine::{BatchId, Engine, Event, OnConflict, ServerConfig, Snapshot, UploadRequest, UploadSource};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
@@ -50,6 +51,8 @@ pub struct App {
     pub awake: windows_shell::Awake,
     pub bridge_tx: tokio::sync::mpsc::UnboundedSender<Incoming>,
     pub pause_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    /// A transfer whose name conflicts the Transfers window should open
+    pub review: Mutex<Option<BatchId>>,
 }
 
 pub type AppRef = Arc<App>;
@@ -113,10 +116,12 @@ fn upload_args(argv: &[String]) -> Vec<PathBuf> {
 
 pub fn run() {
     let argv: Vec<String> = std::env::args().collect();
-    tauri::Builder::default()
+    let self_test = self_test::args(&argv);
+    let mut builder = tauri::Builder::default();
+    if self_test.is_none() {
         // First, so a second launch (e.g. "Upload to Loom" on more files)
         // hands its arguments to the running app instead of starting again.
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let a = app.state::<AppRef>().inner().clone();
             let paths = upload_args(&argv);
             if paths.is_empty() {
@@ -124,7 +129,9 @@ pub fn run() {
             } else {
                 queue_upload_paths(&a, paths, None);
             }
-        }))
+        }));
+    }
+    builder
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -137,6 +144,9 @@ pub fn run() {
             let data_dir = app.path().app_local_data_dir()?;
             init_logging(&data_dir.join("logs"));
             tracing::info!("Loom for Windows {VERSION} starting");
+            if let Some((url, report)) = self_test.clone() {
+                return self_test::start(&handle, url, report);
+            }
             let config_path = config_dir.join("config.json");
             let config = Config::load(&config_path);
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -153,6 +163,7 @@ pub fn run() {
                 awake: windows_shell::Awake::start(),
                 bridge_tx: tx,
                 pause_item: Mutex::new(None),
+                review: Mutex::new(None),
             });
             app.manage(a.clone());
             build_tray(&a)?;
@@ -187,7 +198,7 @@ pub fn run() {
                 }
             }
             if let tauri::RunEvent::Exit = event {
-                if let Some(e) = app.state::<AppRef>().engine() {
+                if let Some(e) = app.try_state::<AppRef>().and_then(|a| a.engine()) {
                     tauri::async_runtime::block_on(e.shutdown());
                 }
             }
@@ -288,13 +299,28 @@ async fn forward_events(a: AppRef, engine: Engine) {
             Event::ScanFinished { .. } => continue,
         };
         let _ = a.handle.notification().builder().title(title).body(body).show();
-        if matches!(ev, Event::SignedOut) {
-            let _ = a.handle.emit("navigate", "transfers");
+        match ev {
+            Event::SignedOut => {
+                let _ = a.handle.emit("navigate", "transfers");
+            }
+            // Someone has to choose: open the question right away.
+            Event::ConflictsFound { batch_id, .. } => {
+                *a.review.lock().unwrap() = Some(batch_id);
+                show_transfers(&a, false);
+                let _ = a.handle.emit("review", batch_id);
+            }
+            _ => {}
         }
     }
 }
 
 // ─── windows ─────────────────────────────────────────────────────────────────
+
+/// The main window when it's on screen: the app's other windows open in
+/// front of it and stay attached to it (an owned window on Windows).
+fn visible_main(a: &AppRef) -> Option<WebviewWindow> {
+    a.handle.get_webview_window("main").filter(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false))
+}
 
 fn app_window(a: &AppRef, label: &str, route: &str, title: &str, size: (f64, f64), min: (f64, f64), resizable: bool) {
     if let Some(w) = a.handle.get_webview_window(label) {
@@ -303,23 +329,29 @@ fn app_window(a: &AppRef, label: &str, route: &str, title: &str, size: (f64, f64
         let _ = w.set_focus();
         return;
     }
-    let built = WebviewWindowBuilder::new(&a.handle, label, WebviewUrl::App(format!("index.html#/{route}").into()))
-        .title(title)
-        .inner_size(size.0, size.1)
-        .min_inner_size(min.0, min.1)
-        .resizable(resizable)
-        .center()
-        .build();
-    if let Err(e) = built {
+    let builder = || {
+        WebviewWindowBuilder::new(&a.handle, label, WebviewUrl::App(format!("index.html#/{route}").into()))
+            .title(title)
+            .inner_size(size.0, size.1)
+            .min_inner_size(min.0, min.1)
+            .resizable(resizable)
+            .center()
+    };
+    let attached = match visible_main(a).filter(|_| label != "onboarding") {
+        Some(main) => builder().owner(&main).unwrap_or_else(|e| {
+            tracing::warn!("can't attach the {label} window to Loom's: {e}");
+            builder()
+        }),
+        None => builder(),
+    };
+    if let Err(e) = attached.build() {
         tracing::error!("can't open the {label} window: {e}");
     }
 }
 
 pub fn show_transfers(a: &AppRef, settings: bool) {
     app_window(a, "transfers", if settings { "settings" } else { "transfers" }, "Loom Transfers", (1000.0, 660.0), (760.0, 480.0), true);
-    if settings {
-        let _ = a.handle.emit("navigate", "settings");
-    }
+    let _ = a.handle.emit("navigate", if settings { "settings" } else { "transfers" });
 }
 
 pub fn show_onboarding(a: &AppRef) {
@@ -410,13 +442,35 @@ pub fn open_main_at(a: &AppRef, url: &str) {
         let _ = w.set_focus();
         return;
     }
-    let Some(server) = a.server() else { return };
     let Ok(parsed) = url::Url::parse(url) else { return };
-    let origin = parsed.origin().ascii_serialization();
     a.page_ready.store(false, Ordering::SeqCst);
-    let handle = a.handle.clone();
+    let w = match build_main_window(&a.handle, parsed, a.bridge_tx.clone()) {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::error!("can't open Loom's window: {e}");
+            return;
+        }
+    };
+    let w2 = w.clone();
+    let a2 = a.clone();
+    w.on_window_event(move |e| {
+        if let WindowEvent::CloseRequested { api, .. } = e {
+            // Keep running in the tray: transfers continue.
+            api.prevent_close();
+            let _ = w2.hide();
+            a2.page_ready.store(false, Ordering::SeqCst);
+        }
+    });
+}
+
+/// The window showing Loom's page at `url`, with the page bridge (also used
+/// by `--bridge-self-test`, so CI checks exactly this).
+pub fn build_main_window(handle: &AppHandle, url: url::Url, tx: tokio::sync::mpsc::UnboundedSender<Incoming>) -> tauri::Result<WebviewWindow> {
+    let origin = url.origin().ascii_serialization();
     let nav_origin = origin.clone();
-    let built = WebviewWindowBuilder::new(&a.handle, "main", WebviewUrl::External(parsed))
+    let nav_handle = handle.clone();
+    let dl_handle = handle.clone();
+    let w = WebviewWindowBuilder::new(handle, "main", WebviewUrl::External(url))
         .title("Loom")
         .inner_size(1280.0, 820.0)
         .min_inner_size(480.0, 400.0)
@@ -428,30 +482,82 @@ pub fn open_main_at(a: &AppRef, url: &str) {
                 return true;
             }
             use tauri_plugin_opener::OpenerExt;
-            let _ = handle.opener().open_url(u.as_str(), None::<&str>);
+            let _ = nav_handle.opener().open_url(u.as_str(), None::<&str>);
             false
         })
-        .build();
-    let w: WebviewWindow = match built {
-        Ok(w) => w,
-        Err(e) => {
-            tracing::error!("can't open Loom's window: {e}");
-            return;
+        // The browser-style downloads that are left (Download as ZIP).
+        .on_download(move |_, event| browser_download(&dl_handle, event))
+        .build()?;
+    bridge::install(&w, origin, tx)?;
+    Ok(w)
+}
+
+/// A download the page started itself (a ZIP): saved in the download folder
+/// without asking, and reported in the page.
+fn browser_download(handle: &AppHandle, event: tauri::webview::DownloadEvent<'_>) -> bool {
+    use tauri::webview::DownloadEvent;
+    let Some(a) = handle.try_state::<AppRef>().map(|s| s.inner().clone()) else { return true };
+    match event {
+        DownloadEvent::Requested { destination, .. } => {
+            let dir = PathBuf::from(a.config.lock().unwrap().settings.download_dir.clone());
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                tracing::warn!("can't create {}: {e}", dir.display());
+                return true; // WebView2's own choice of folder
+            }
+            let name = destination.file_name().map(|n| n.to_owned()).unwrap_or_else(|| "Loom download.zip".into());
+            *destination = unique_path(&dir.join(name));
+            page_toast(&a, "info", &format!("Downloading {}…", file_label(destination)), false);
+            true
         }
-    };
-    if let Err(e) = bridge::install(&w, server, a.bridge_tx.clone()) {
-        tracing::error!("page bridge: {e}");
+        DownloadEvent::Finished { path, success, .. } => {
+            match (success, path) {
+                (true, Some(p)) => page_toast(&a, "success", &format!("Saved {} to {}", file_label(&p), p.parent().map(|d| d.display().to_string()).unwrap_or_default()), false),
+                _ => page_toast(&a, "error", "The download didn't finish. Try again.", false),
+            }
+            true
+        }
+        _ => true,
     }
-    let w2 = w.clone();
-    let a2 = a.clone();
-    w.on_window_event(move |e| {
-        if let WindowEvent::CloseRequested { api, .. } = e {
-            // Keep running in the tray: transfers continue.
-            api.prevent_close();
-            let _ = w2.hide();
-            a2.page_ready.store(false, Ordering::SeqCst);
-        }
-    });
+}
+
+fn file_label(p: &std::path::Path) -> String {
+    p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
+/// `name.zip`, or `name (2).zip` … when that's taken.
+fn unique_path(p: &std::path::Path) -> PathBuf {
+    if !p.exists() {
+        return p.to_path_buf();
+    }
+    let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let ext = p.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    (2..10_000).map(|i| p.with_file_name(format!("{stem} ({i}){ext}"))).find(|c| !c.exists()).unwrap_or_else(|| p.to_path_buf())
+}
+
+/// Run `js` in Loom's page (when it's there).
+fn page_eval(a: &AppRef, js: String) {
+    if let Some(w) = a.handle.get_webview_window("main") {
+        let _ = w.eval(js);
+    }
+}
+
+/// A toast in Loom's page; `transfers` adds an "Open Transfers" button.
+pub fn page_toast(a: &AppRef, kind: &str, message: &str, transfers: bool) {
+    if !a.page_ready.load(Ordering::SeqCst) {
+        return;
+    }
+    let detail = serde_json::json!({ "kind": kind, "message": message, "action": if transfers { Some("transfers") } else { None } });
+    page_eval(a, bridge::event_js("loomapp:toast", &detail));
+}
+
+/// A file/folder picker in front of the window the user is looking at.
+pub fn file_dialog(a: &AppRef) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
+    use tauri_plugin_dialog::DialogExt;
+    let d = a.handle.dialog().file();
+    match visible_main(a).or_else(|| a.handle.get_webview_window("transfers")) {
+        Some(w) => d.set_parent(&w),
+        None => d,
+    }
 }
 
 // ─── uploads from outside the page ───────────────────────────────────────────
@@ -493,18 +599,27 @@ pub async fn start_upload(a: &AppRef, dest: String, sources: Vec<UploadSource>, 
 // ─── the page bridge ─────────────────────────────────────────────────────────
 
 async fn handle_bridge(a: AppRef, mut rx: tokio::sync::mpsc::UnboundedReceiver<Incoming>) {
-    use tauri_plugin_dialog::DialogExt;
-    while let Some(Incoming { message, paths }) = rx.recv().await {
-        match message {
+    while let Some(Incoming { id, message, paths }) = rx.recv().await {
+        // Tell the page it was heard (it falls back to doing it itself if not).
+        let result: Result<serde_json::Value, String> = match message {
             Message::Ready => {
                 a.page_ready.store(true, Ordering::SeqCst);
                 if let Some(e) = a.engine() {
                     push_to_page(&a, &e.snapshot());
                 }
+                Ok(serde_json::Value::Null)
             }
             Message::UploadFiles { dest_dir, items } => {
                 // Decisions were made in the page's conflict dialog; paths come
                 // from WebView2 (one per file, in order).
+                if paths.len() != items.len() {
+                    // Some files have no path on disk: let the page upload them all itself.
+                    tracing::warn!(items = items.len(), files = paths.len(), "bridge: files and their details don't match");
+                    if let Some(id) = id {
+                        page_eval(&a, bridge::ack_js(id, Err("Some of these files aren't on this PC's disk".into())));
+                    }
+                    continue;
+                }
                 let sources: Vec<UploadSource> = items
                     .into_iter()
                     .zip(paths)
@@ -514,8 +629,25 @@ async fn handle_bridge(a: AppRef, mut rx: tokio::sync::mpsc::UnboundedReceiver<I
                         conflict: OnConflict::parse(&it.conflict).or(Some(OnConflict::KeepBoth)),
                     })
                     .collect();
-                if let Err(e) = start_upload(&a, dest_dir, sources, OnConflict::KeepBoth).await {
-                    tracing::warn!("upload from the page failed: {e}");
+                if sources.is_empty() {
+                    Err("No files came through. Try again, or use Upload files.".to_string())
+                } else {
+                    // Answer at once: a late answer would make the page upload them itself too.
+                    if let Some(id) = id {
+                        page_eval(&a, bridge::ack_js(id, Ok(serde_json::json!({ "count": sources.len() }))));
+                    }
+                    let a2 = a.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let n = sources.len();
+                        match start_upload(&a2, dest_dir.clone(), sources, OnConflict::KeepBoth).await {
+                            Ok(()) => page_toast(&a2, "info", &uploading_text(n, &dest_dir), true),
+                            Err(e) => {
+                                tracing::warn!("upload from the page failed: {e}");
+                                page_toast(&a2, "error", &format!("Couldn't start the upload: {e}"), false);
+                            }
+                        }
+                    });
+                    continue;
                 }
             }
             Message::PickUpload { dest_dir, mode } => {
@@ -524,39 +656,78 @@ async fn handle_bridge(a: AppRef, mut rx: tokio::sync::mpsc::UnboundedReceiver<I
                     let a3 = a2.clone();
                     let dest = dest_dir.clone();
                     tauri::async_runtime::spawn(async move {
+                        let n = picked.len();
                         let sources = picked.into_iter().map(|p| UploadSource { path: p, relative_path: None, conflict: None }).collect();
-                        if let Err(e) = start_upload(&a3, dest, sources, OnConflict::Ask).await {
-                            tracing::warn!("upload failed: {e}");
+                        match start_upload(&a3, dest.clone(), sources, OnConflict::Ask).await {
+                            Ok(()) => page_toast(&a3, "info", &uploading_text(n, &dest), true),
+                            Err(e) => {
+                                tracing::warn!("upload failed: {e}");
+                                page_toast(&a3, "error", &format!("Couldn't start the upload: {e}"), false);
+                            }
                         }
                     });
                 };
                 if mode == "folder" {
-                    a.handle.dialog().file().set_title("Upload a folder to Loom").pick_folder(move |f| {
+                    file_dialog(&a).set_title("Upload a folder to Loom").pick_folder(move |f| {
                         if let Some(p) = f.and_then(|f| f.into_path().ok()) {
                             done(vec![p]);
                         }
                     });
                 } else {
-                    a.handle.dialog().file().set_title("Upload files to Loom").pick_files(move |fs| {
+                    file_dialog(&a).set_title("Upload files to Loom").pick_files(move |fs| {
                         let picked: Vec<PathBuf> = fs.unwrap_or_default().into_iter().filter_map(|f| f.into_path().ok()).collect();
                         if !picked.is_empty() {
                             done(picked);
                         }
                     });
                 }
+                Ok(serde_json::Value::Null)
             }
             Message::Download { items } => {
                 let entries: Vec<loom_engine::RemoteEntry> =
                     items.into_iter().map(|i| loom_engine::RemoteEntry { is_dir: i.kind == "DIRECTORY", path: i.path, name: i.name }).collect();
-                commands::download_entries(&a, entries).await;
+                // Answer first: "ask where to save" shows a folder picker.
+                if let Some(id) = id {
+                    page_eval(&a, bridge::ack_js(id, Ok(serde_json::Value::Null)));
+                }
+                let a2 = a.clone();
+                tauri::async_runtime::spawn(async move { commands::download_entries(&a2, entries).await });
+                continue;
             }
-            Message::OpenTransfers => show_transfers(&a, false),
+            Message::OpenTransfers => {
+                show_transfers(&a, false);
+                Ok(serde_json::Value::Null)
+            }
+            Message::OpenSettings => {
+                show_transfers(&a, true);
+                Ok(serde_json::Value::Null)
+            }
             Message::SetLocation { path, can_write } => {
                 *a.location.lock().unwrap() = if can_write { path } else { None };
+                Ok(serde_json::Value::Null)
             }
-            Message::SignedOut => commands::sign_out_app(&a).await,
+            Message::SignedOut => {
+                commands::sign_out_app(&a).await;
+                continue;
+            }
+            Message::Log { level, message } => {
+                match level.as_str() {
+                    "error" => tracing::error!("page: {message}"),
+                    "warn" => tracing::warn!("page: {message}"),
+                    _ => tracing::info!("page: {message}"),
+                }
+                Ok(serde_json::Value::Null)
+            }
+        };
+        if let Some(id) = id {
+            page_eval(&a, bridge::ack_js(id, result));
         }
     }
+}
+
+fn uploading_text(n: usize, dest: &str) -> String {
+    let to = if dest.is_empty() { "Loom".to_string() } else { dest.rsplit('/').next().unwrap_or(dest).to_string() };
+    format!("Uploading {n} item{} to {to}", if n == 1 { "" } else { "s" })
 }
 
 // ─── tray ────────────────────────────────────────────────────────────────────
@@ -587,7 +758,7 @@ fn build_tray(a: &AppRef) -> tauri::Result<()> {
                 "settings" => show_transfers(&a, true),
                 "upload-files" | "upload-folder" => {
                     let folder = event.id().as_ref() == "upload-folder";
-                    tauri::async_runtime::spawn(async move { commands::pick_for_upload(&a, folder).await });
+                    tauri::async_runtime::spawn(async move { commands::pick_for_upload(&a, folder, None).await });
                 }
                 "pause" => {
                     if let Some(e) = a.engine() {

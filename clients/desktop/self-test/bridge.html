@@ -1,0 +1,61 @@
+<!doctype html>
+<!--
+  The page side of `Loom.exe --bridge-self-test` (see src-tauri/src/self_test.rs).
+  Served over http://127.0.0.1 in CI; it plays Loom's web page and uses
+  window.LoomApp the way web/lib/client/native.ts does.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Loom bridge self-test</title>
+</head>
+<body>
+  <pre id="out"></pre>
+  <script>
+    const out = (s) => (document.getElementById("out").textContent += s + "\n");
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const within = (p, ms) => Promise.race([p.then(() => "ok", (e) => "error: " + e.message), wait(ms).then(() => "no answer")]);
+
+    async function main() {
+      for (let i = 0; i < 200 && !window.LoomApp; i++) await wait(50);
+      const app = window.LoomApp;
+      if (!app) {
+        out("no window.LoomApp (chrome.webview: " + !!(window.chrome && window.chrome.webview) + ")");
+        return; // nothing to report through: the app times out
+      }
+      const fail = (m) => {
+        out("FAIL " + m);
+        app.log("error", "self-test: fail: " + m);
+      };
+      try {
+        out("LoomApp " + app.apiVersion + " " + app.platform + " " + JSON.stringify(app.capabilities));
+        if (app.apiVersion < 2) return fail("apiVersion " + app.apiVersion);
+        // App → page: the app answers ready() with a transfers update.
+        const update = new Promise((res) => addEventListener("loomapp:transfers", (e) => res(e.detail), { once: true }));
+        app.ready();
+        const t = await Promise.race([update, wait(10000).then(() => null)]);
+        if (!t) return fail("no loomapp:transfers after ready()");
+        out("transfers update: " + JSON.stringify(t));
+        // Page → app → page: every request is acknowledged.
+        const calls = [
+          ["openTransfers", () => app.openTransfers()],
+          ["openSettings", () => app.openSettings()],
+          ["pickUpload", () => app.pickUpload("Docs", "files")],
+          ["download", () => app.download({ items: [{ path: "Docs/a.txt", name: "a.txt", type: "FILE" }] })],
+        ];
+        for (const [name, call] of calls) {
+          const r = await within(call(), 10000);
+          out(name + ": " + r);
+          if (r !== "ok") return fail(name + ": " + r);
+        }
+        app.setLocation({ path: "Docs", canWrite: true });
+        app.log("info", "self-test: pass");
+        out("done");
+      } catch (e) {
+        fail(String((e && e.stack) || e));
+      }
+    }
+    main();
+  </script>
+</body>
+</html>

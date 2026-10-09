@@ -25,7 +25,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
     tauri::generate_handler![
         app_state, check_server, start_pairing, cancel_pairing, sign_out, snapshot, batches, items, conflicts, decide, pause, resume, cancel, retry,
         remove_batch, clear_finished, pick_upload, list_folder, create_folder, pending_upload, confirm_upload, cancel_pending_upload,
-        recent_destinations, settings, set_settings, choose_download_dir, open_main, open_transfers, reveal, open_logs, close_window
+        recent_destinations, settings, set_settings, choose_download_dir, open_main, open_transfers, reveal, open_logs, close_window, take_review
     ]
 }
 
@@ -138,6 +138,8 @@ async fn start_pairing(a: State<'_, AppRef>, url: String, device_name: String) -
         c.device_name = name;
     }
     crate::open_main_at(&a, &approve);
+    // Keep the check code in view next to the approval page.
+    on_top(&a, true);
 
     if let Some(old) = a.pairing.lock().unwrap().take() {
         old.abort();
@@ -163,11 +165,13 @@ async fn start_pairing(a: State<'_, AppRef>, url: String, device_name: String) -
                     }
                     if !secret::set(&url, &token) {
                         tracing::error!("couldn't store the device token");
+                        on_top(&a2, false);
                         let _ = a2.handle.emit("pairing", "error");
                         return;
                     }
                     crate::start_engine(&a2).await;
                     crate::apply_windows_settings(&a2);
+                    on_top(&a2, false);
                     let _ = a2.handle.emit("pairing", "approved");
                     // The approval page is done; show Loom.
                     if let Some(w) = a2.handle.get_webview_window("main") {
@@ -177,10 +181,12 @@ async fn start_pairing(a: State<'_, AppRef>, url: String, device_name: String) -
                 }
                 (200, _) => {}
                 (403, _) => {
+                    on_top(&a2, false);
                     let _ = a2.handle.emit("pairing", "denied");
                     return;
                 }
                 (404 | 410, _) => {
+                    on_top(&a2, false);
                     let _ = a2.handle.emit("pairing", "expired");
                     return;
                 }
@@ -196,6 +202,14 @@ async fn start_pairing(a: State<'_, AppRef>, url: String, device_name: String) -
 fn cancel_pairing(a: State<AppRef>) {
     if let Some(t) = a.pairing.lock().unwrap().take() {
         t.abort();
+    }
+    on_top(a.inner(), false);
+}
+
+/// The sign-in window above everything while it waits for approval.
+fn on_top(a: &AppRef, yes: bool) {
+    if let Some(w) = a.handle.get_webview_window("onboarding") {
+        let _ = w.set_always_on_top(yes);
     }
 }
 
@@ -277,6 +291,12 @@ fn retry(a: State<AppRef>, batch_id: Option<BatchId>, item_id: Option<ItemId>) -
     engine(&a)?.retry(batch_id, item_id).map_err(|e| e.to_string())
 }
 
+/// A transfer with name conflicts to ask about now (once).
+#[tauri::command]
+fn take_review(a: State<AppRef>) -> Option<BatchId> {
+    a.review.lock().unwrap().take()
+}
+
 #[tauri::command]
 fn remove_batch(a: State<AppRef>, batch_id: BatchId) -> R<()> {
     engine(&a)?.remove_batch(batch_id).map_err(|e| e.to_string())
@@ -291,9 +311,12 @@ fn clear_finished(a: State<AppRef>) -> R<usize> {
 
 /// Pick files or a folder, then ask where in Loom (the folder open in Loom's
 /// window is suggested).
-pub async fn pick_for_upload(a: &AppRef, folder: bool) {
+pub async fn pick_for_upload(a: &AppRef, folder: bool, over: Option<tauri::WebviewWindow>) {
     let (tx, rx) = tokio::sync::oneshot::channel::<Vec<PathBuf>>();
-    let d = a.handle.dialog().file();
+    let d = match over {
+        Some(w) => a.handle.dialog().file().set_parent(&w),
+        None => crate::file_dialog(a),
+    };
     if folder {
         d.set_title("Upload a folder to Loom").pick_folder(move |f| {
             let _ = tx.send(f.and_then(|f| f.into_path().ok()).into_iter().collect());
@@ -311,8 +334,8 @@ pub async fn pick_for_upload(a: &AppRef, folder: bool) {
 }
 
 #[tauri::command]
-async fn pick_upload(a: State<'_, AppRef>, kind: String) -> R<()> {
-    pick_for_upload(a.inner(), kind == "folder").await;
+async fn pick_upload(a: State<'_, AppRef>, window: tauri::WebviewWindow, kind: String) -> R<()> {
+    pick_for_upload(a.inner(), kind == "folder", Some(window)).await;
     Ok(())
 }
 
@@ -404,11 +427,14 @@ fn recent_destinations(a: State<AppRef>) -> Vec<String> {
 // ─── downloads ───────────────────────────────────────────────────────────────
 
 pub async fn download_entries(a: &AppRef, entries: Vec<RemoteEntry>) {
-    let Some(engine) = a.engine() else { return };
+    let Some(engine) = a.engine() else {
+        crate::page_toast(a, "error", "This PC isn't signed in to Loom. Open Transfers to sign in.", true);
+        return;
+    };
     let s = a.config.lock().unwrap().settings.clone();
     let dir = if s.ask_download_dir {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        a.handle.dialog().file().set_title("Save to").pick_folder(move |f| {
+        crate::file_dialog(a).set_title("Save to").pick_folder(move |f| {
             let _ = tx.send(f.and_then(|f| f.into_path().ok()));
         });
         match rx.await.ok().flatten() {
@@ -418,15 +444,23 @@ pub async fn download_entries(a: &AppRef, entries: Vec<RemoteEntry>) {
     } else {
         PathBuf::from(&s.download_dir)
     };
-    if let Err(e) = engine.download(loom_engine::DownloadRequest { entries, local_dir: dir, title: None }).await {
-        tracing::warn!("download failed to start: {e}");
+    let what = match entries.as_slice() {
+        [one] => one.name.clone(),
+        many => format!("{} items", many.len()),
+    };
+    match engine.download(loom_engine::DownloadRequest { entries, local_dir: dir.clone(), title: None }).await {
+        Ok(_) => crate::page_toast(a, "info", &format!("Downloading {what} to {}", dir.display()), true),
+        Err(e) => {
+            tracing::warn!("download failed to start: {e}");
+            crate::page_toast(a, "error", &format!("Couldn't start the download: {e}"), false);
+        }
     }
 }
 
 #[tauri::command]
-async fn choose_download_dir(a: State<'_, AppRef>) -> R<Option<String>> {
+async fn choose_download_dir(a: State<'_, AppRef>, window: tauri::WebviewWindow) -> R<Option<String>> {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    a.handle.dialog().file().set_title("Save downloads to").pick_folder(move |f| {
+    a.handle.dialog().file().set_parent(&window).set_title("Save downloads to").pick_folder(move |f| {
         let _ = tx.send(f.and_then(|f| f.into_path().ok()));
     });
     Ok(rx.await.ok().flatten().map(|p| p.to_string_lossy().into_owned()))
