@@ -347,13 +347,17 @@ impl Api {
     }
 
     /// Send a request (built fresh for each attempt), over the LAN when it's
-    /// up; a LAN connection failure retries once over the internet.
+    /// up; a LAN failure retries once over the internet. Any failure to get a
+    /// response counts, not only "can't connect": leaving the home network
+    /// also kills connections that are already open, and reusing one of those
+    /// fails as "connection closed".
     async fn send(&self, make: impl Fn(&reqwest::Client, Url) -> RequestBuilder, path: &str) -> Result<Response> {
         let (base, client, via) = self.pick();
         let url = base.join(path).map_err(|e| Error::Permanent(e.to_string()))?;
         let res = make(&client, url).bearer_auth(self.token()).send().await;
         match res {
-            Err(e) if via == Via::Lan && (e.is_connect() || e.is_timeout()) => {
+            Err(e) if via == Via::Lan && !e.is_builder() => {
+                tracing::debug!("LAN request failed ({e}); retrying over the internet");
                 self.lan_down();
                 let (base, client, _) = self.pick();
                 let url = base.join(path).map_err(|e| Error::Permanent(e.to_string()))?;
