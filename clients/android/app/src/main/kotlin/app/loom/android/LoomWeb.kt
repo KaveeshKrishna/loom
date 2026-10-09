@@ -172,11 +172,13 @@ class LoomWeb(
         }
 
         override fun onPageFinished(view: WebView, url: String) {
+            android.util.Log.i("LoomPage", "loaded $url")
             loading.value = false
             if (url.startsWith(server) && !url.contains("/login") && !pairing) lastUrl = url
         }
 
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+            android.util.Log.w("LoomPage", "error ${error.errorCode} ${error.description} for ${request.url}")
             if (request.isForMainFrame) failed(request.url.toString())
         }
 
@@ -186,6 +188,11 @@ class LoomWeb(
     }
 
     private inner class Chrome : WebChromeClient() {
+        override fun onConsoleMessage(message: android.webkit.ConsoleMessage): Boolean {
+            android.util.Log.i("LoomPage", "${message.messageLevel()}: ${message.message()} (${message.sourceId()}:${message.lineNumber()})")
+            return true
+        }
+
         override fun onShowFileChooser(webView: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean =
             events.onFileChooser(callback, params.mode == FileChooserParams.MODE_OPEN_MULTIPLE)
 

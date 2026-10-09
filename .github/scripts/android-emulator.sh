@@ -10,5 +10,6 @@ gradle --no-daemon :app:connectedDebugAndroidTest \
   -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true || status=$?
 mkdir -p screens
 adb pull /data/local/tmp/loom-screens/. screens/ || adb pull /sdcard/Android/data/app.loom.android/files/screens/. screens/ || true
+adb logcat -d -s LoomPage:* chromium:* AndroidRuntime:E > screens/logcat.txt || true
 ls -la screens || true
 exit $status

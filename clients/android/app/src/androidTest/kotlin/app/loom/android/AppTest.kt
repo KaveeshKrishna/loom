@@ -133,9 +133,12 @@ class AppTest {
             throw e
         }
 
-        // Loom's own page, signed in through the device token.
-        Thread.sleep(9000)
+        // Loom's own page, signed in through the device token, showing the test folder.
+        val shown = device.wait(Until.hasObject(By.textContains(folder)), 30_000)
         shot("4-loom")
+        device.dumpWindowHierarchy(File(instr.targetContext.getExternalFilesDir(null), "loom-page.xml"))
+        device.executeShellCommand("cp ${instr.targetContext.getExternalFilesDir(null)}/loom-page.xml /data/local/tmp/loom-screens/api${Build.VERSION.SDK_INT}-$kind-page.xml")
+        assertTrue("Loom's page doesn't show the folder \"$folder\"", shown)
 
         // An upload through the app's engine, checked on the server.
         val f = File(instr.targetContext.cacheDir, "hello from android.txt").apply { writeText("Hello from the Loom app") }
