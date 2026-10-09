@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="upload"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_upload"
+        android:shortcutShortLabel="@string/shortcut_upload">
+        <intent
+            android:action="app.loom.android.UPLOAD"
+            android:targetPackage="app.loom.android"
+            android:targetClass="app.loom.android.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="transfers"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_transfers"
+        android:shortcutShortLabel="@string/shortcut_transfers">
+        <intent
+            android:action="app.loom.android.TRANSFERS"
+            android:targetPackage="app.loom.android"
+            android:targetClass="app.loom.android.MainActivity" />
+    </shortcut>
+</shortcuts>

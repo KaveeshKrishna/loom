@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Loom</string>
+    <string name="share_label">Loom</string>
+    <string name="shortcut_upload">Upload</string>
+    <string name="shortcut_transfers">Transfers</string>
+    <string name="channel_transfers">Transfers</string>
+    <string name="channel_transfers_about">Progress of uploads and downloads</string>
+    <string name="channel_events">Updates and alerts</string>
+    <string name="channel_events_about">Finished transfers, files that need a decision, and app updates</string>
+</resources>

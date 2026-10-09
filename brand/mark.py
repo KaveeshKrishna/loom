@@ -92,5 +92,7 @@ if __name__ == "__main__":
         # Themed (monochrome) icon: one colour; the launcher tints it. The gaps become holes.
         (res / "drawable" / "ic_launcher_monochrome.xml").write_text(
             android_vector({"warp": "#FFFFFFFF", "weft": "#FFFFFFFF"}, 0.5))
+        (res / "drawable" / "ic_splash.xml").write_text(
+            android_vector({"warp": WARP, "weft": WEFT}, 0.5))
         (res / "drawable" / "ic_notification.xml").write_text(
             android_vector({"warp": "#FFFFFFFF", "weft": "#FFFFFFFF"}, 0.78))
