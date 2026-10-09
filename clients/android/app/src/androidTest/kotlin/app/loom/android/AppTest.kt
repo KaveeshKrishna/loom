@@ -4,15 +4,13 @@ import android.Manifest
 import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Build
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTextInput
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.UiObject2
+import androidx.test.uiautomator.Until
 import app.loom.engine.OnConflict
 import app.loom.engine.UploadRequest
 import app.loom.engine.UploadSource
@@ -27,7 +25,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
-import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -39,10 +36,12 @@ import kotlin.random.Random
  * (tests/stack, reached through `adb reverse`): sign in with a pairing code,
  * see Loom, upload a file, and screenshots of every screen in light and
  * dark for review. CI passes -Pandroid.testInstrumentationRunnerArguments.loomTestUrl=…
+ * Driven through UI Automator, like a person would, so the app runs with
+ * its real frame clock (a Compose test rule would freeze it between steps).
  */
 @RunWith(AndroidJUnit4::class)
 class AppTest {
-    @get:Rule val rule = createAndroidComposeRule<MainActivity>()
+    private lateinit var scenario: ActivityScenario<MainActivity>
 
     private val instr = InstrumentationRegistry.getInstrumentation()
     private val device = UiDevice.getInstance(instr)
@@ -80,7 +79,7 @@ class AppTest {
     }
 
     private fun open(action: String) {
-        rule.activityRule.scenario.onActivity { it.startActivity(Intent(it, MainActivity::class.java).setAction(action)) }
+        scenario.onActivity { it.startActivity(Intent(it, MainActivity::class.java).setAction(action)) }
         Thread.sleep(800)
     }
 
@@ -90,6 +89,18 @@ class AppTest {
             if (System.currentTimeMillis() > until) throw AssertionError("timed out waiting for $what")
             Thread.sleep(250)
         }
+    }
+
+    private fun find(text: String, ms: Long = 20_000): UiObject2 =
+        device.wait(Until.findObject(By.text(text)), ms) ?: run {
+            shot("failed")
+            throw AssertionError("\"$text\" didn't appear")
+        }
+
+    private fun type(text: String) {
+        val field = device.wait(Until.findObject(By.clazz("android.widget.EditText")), 10_000) ?: throw AssertionError("no text field")
+        field.click()
+        field.text = text
     }
 
     @Test
@@ -102,17 +113,25 @@ class AppTest {
         post("/api/fs/mkdir", """{"parentPath":"","name":"$folder"}""", mapOf("cookie" to cookie)).close()
         post("/api/fs/mkdir", """{"parentPath":"$folder","name":"Holiday photos"}""", mapOf("cookie" to cookie)).close()
 
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        find("Welcome to Loom")
         shot("1-welcome")
-        rule.onNodeWithTag("address").performTextInput(base)
-        rule.onNodeWithText("Continue").performClick()
-        rule.waitUntil(20_000) { rule.onAllNodesWithText("Use a pairing code").fetchSemanticsNodes().isNotEmpty() }
+        type(base)
+        find("Continue").click()
+        find("Use a pairing code")
         shot("2-sign-in")
-        rule.onNodeWithText("Use a pairing code").performClick()
+        find("Use a pairing code").click()
         val code = post("/api/devices/codes", "{}", mapOf("cookie" to cookie)).use { Json.parseToJsonElement(it.body!!.string()).jsonObject["code"]!!.jsonPrimitive.content }
-        rule.onNodeWithTag("code").performTextInput(code)
+        find("Pairing code")
+        type(code)
         shot("3-code")
-        rule.onNodeWithText("Sign in").performClick()
-        waitFor("signing in", 30_000) { app.config.signedIn && app.engine.value != null }
+        find("Sign in").click()
+        try {
+            waitFor("signing in", 30_000) { app.config.signedIn && app.engine.value != null }
+        } catch (e: AssertionError) {
+            shot("failed")
+            throw e
+        }
 
         // Loom's own page, signed in through the device token.
         Thread.sleep(9000)
