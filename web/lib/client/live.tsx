@@ -53,26 +53,82 @@ export function onJobEvent(fn: (ev: JobEvent) => void): () => void {
   };
 }
 
-const LiveContext = createContext<{ connected: boolean }>({ connected: false });
+interface LiveState {
+  connected: boolean;
+  /** The connection has been down for a few seconds (Loom restarting or offline) */
+  lost: boolean;
+  /** Loom came back running different code: this page is out of date */
+  updated: boolean;
+}
+
+const LiveContext = createContext<LiveState>({ connected: false, lost: false, updated: false });
+
+/** Loom's build id, or null when it can't be reached. */
+async function serverBuild(): Promise<string | null> {
+  try {
+    const r = await fetch("/api/health", { cache: "no-store" });
+    if (!r.ok) return null;
+    return ((await r.json()) as { build?: string }).build ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export function LiveProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
+  const [lost, setLost] = useState(false);
+  const [updated, setUpdated] = useState(false);
 
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_DEMO_MODE === "1" || typeof EventSource === "undefined") return;
     let es: EventSource | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;
+    let lostTimer: ReturnType<typeof setTimeout> | null = null;
+    let wasLost = false;
     let closed = false;
 
+    const checkBuild = async () => {
+      const mine = process.env.NEXT_PUBLIC_LOOM_BUILD;
+      const theirs = await serverBuild();
+      if (mine && theirs && theirs !== mine && theirs !== "dev") setUpdated(true);
+    };
+
+    // While the stream is down, ask /api/health every few seconds and reconnect as soon as it answers.
+    let lastOpen = 0;
+    const waitForServer = async () => {
+      if (closed) return;
+      if ((await serverBuild()) == null) {
+        retry = setTimeout(waitForServer, 4000);
+      } else if (Date.now() - lastOpen < 10_000) {
+        // Loom is up but refuses the stream (e.g. signed out): don't hammer it.
+        retry = setTimeout(open, 15_000);
+      } else {
+        open();
+      }
+    };
+
     const open = () => {
+      if (closed) return;
+      lastOpen = Date.now();
+      es?.close();
       es = new EventSource("/api/events");
-      es.onopen = () => setConnected(true);
+      es.onopen = () => {
+        setConnected(true);
+        if (lostTimer) clearTimeout(lostTimer);
+        lostTimer = null;
+        setLost(false);
+        if (wasLost) void checkBuild();
+        wasLost = false;
+      };
       es.onerror = () => {
         setConnected(false);
-        // EventSource retries by itself; if the server returned an error
-        // (e.g. signed out) it gives up, so reopen slowly.
+        wasLost = true;
+        lostTimer ??= setTimeout(() => setLost(true), 4000);
+        // EventSource retries by itself, but gives up when the server answered
+        // with an error (e.g. a proxy's 502 while Loom restarts): take over.
         if (es && es.readyState === EventSource.CLOSED && !closed) {
-          retry = setTimeout(open, 15_000);
+          if (retry) clearTimeout(retry);
+          retry = setTimeout(waitForServer, 2000);
         }
       };
       es.onmessage = (msg) => {
@@ -89,11 +145,17 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     return () => {
       closed = true;
       if (retry) clearTimeout(retry);
+      if (lostTimer) clearTimeout(lostTimer);
       es?.close();
     };
   }, []);
 
-  return <LiveContext.Provider value={{ connected }}>{children}</LiveContext.Provider>;
+  return <LiveContext.Provider value={{ connected, lost, updated }}>{children}</LiveContext.Provider>;
+}
+
+/** Whether Loom is reachable, and whether it was updated since this page loaded. */
+export function useLiveStatus(): LiveState {
+  return useContext(LiveContext);
 }
 
 export function useLiveConnected(): boolean {

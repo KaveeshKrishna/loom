@@ -12,7 +12,7 @@ import type { LNode } from "@/lib/client/types";
 import { toast } from "@/components/ui/Toaster";
 import { dialogs, validateFileName } from "@/components/ui/Dialog";
 import { askCollision, resolveConflicts, type CollisionAction, type ConflictInfo, type Resolution } from "./CollisionDialog";
-import { nativeDownload } from "@/lib/client/native";
+import { nativeApp, nativeDownload } from "@/lib/client/native";
 
 interface OpResult {
   path: string;
@@ -364,9 +364,10 @@ export async function setFavorite(nodeId: string, favorite: boolean): Promise<bo
  */
 export function downloadItems(nodes: Pick<LNode, "relativePath" | "type" | "name">[], opts: { zip?: boolean } = {}) {
   if (nodes.length === 0) return;
-  // Inside a Loom app: its download manager (resumable, folders file by file),
-  // unless a ZIP was asked for (the app saves the browser download itself).
-  if (!opts.zip && nativeDownload(nodes.map((n) => ({ path: n.relativePath, name: n.name, type: n.type })), () => browserDownload(nodes))) return;
+  // Inside a Loom app: its download manager (resumable, folders file by file).
+  // A ZIP goes to the app only if it makes ZIPs itself (Android); otherwise
+  // the browser downloads it and the app saves it (Windows).
+  if (nativeDownload(nodes.map((n) => ({ path: n.relativePath, name: n.name, type: n.type })), () => browserDownload(nodes), opts)) return;
   browserDownload(nodes);
 }
 
@@ -384,6 +385,7 @@ function browserDownload(nodes: Pick<LNode, "relativePath" | "type" | "name">[])
     document.body.appendChild(a);
     a.click();
     a.remove();
+    browserDownloadHint(`Downloading ${nodes[0].name}`);
     return;
   }
   const form = document.createElement("form");
@@ -400,5 +402,16 @@ function browserDownload(nodes: Pick<LNode, "relativePath" | "type" | "name">[])
   document.body.appendChild(form);
   form.submit();
   form.remove();
-  toast.info("Preparing your ZIP download…");
+  browserDownloadHint("Preparing your ZIP download");
+}
+
+/** The browser runs its downloads itself; say where they can be paused or cancelled. */
+function browserDownloadHint(what: string) {
+  if (nativeApp()) {
+    // The app saves it and reports back itself.
+    toast.info(`${what}…`);
+    return;
+  }
+  const where = window.matchMedia("(pointer: coarse)").matches ? "your browser's downloads" : "your browser's downloads (Ctrl+J)";
+  toast.info(`${what}. Pause or cancel it in ${where}.`);
 }

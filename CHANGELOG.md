@@ -2,6 +2,14 @@
 
 What changed in each version of Loom, newest first. Update with `./scripts/update.sh`, see [docs/UPGRADING.md](docs/UPGRADING.md).
 
+## 2.2.2
+
+- **Dropped files are confirmed first.** Dropping files or folders on Loom asks "Upload 3 files to Photos?" before anything is uploaded.
+- **Pause, resume and cancel uploads** in the website's upload panel, one at a time or all at once. Paused uploads continue from where they stopped.
+- **When Loom restarts or goes offline**, open pages show a "Can't reach Loom. Reconnecting…" bar, reconnect by themselves, and reload themselves when Loom was updated meanwhile (no more stale pages after an update). `/api/health` now includes the build id.
+- Browser downloads say where to pause or cancel them.
+- For Loom for Windows 1.1: dropped files and whole folders go straight to the app (it reads folders itself), and the app's ZIP downloads are set up for the coming Android app.
+
 ## 2.2.1
 
 Fixes from the first round of testing Loom for Windows.

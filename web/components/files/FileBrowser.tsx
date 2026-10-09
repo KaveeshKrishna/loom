@@ -28,7 +28,7 @@ import {
 import { cn, formatBytes, sortNodes, matchesTypeFilter } from "@/lib/utils";
 import { filesHref, parentOf } from "@/lib/client/api";
 import type { LNode } from "@/lib/client/types";
-import { collectDroppedFiles, LOOM_DRAG_TYPE } from "@/lib/client/drop";
+import { LOOM_DRAG_TYPE } from "@/lib/client/drop";
 import { pickForUpload, hasNative, useNativeLocation } from "@/lib/client/native";
 import { useFavoriteIds, useFolderSizes, setFavoriteLocal } from "@/lib/client/hooks";
 import { useViewPrefs, useNav, type SortKey, type TypeFilter } from "@/components/layout/TopBarContext";
@@ -95,7 +95,7 @@ export function FileBrowser({
   const { viewMode, gridSize, sortKey, sortDir, setSort, typeFilter, setTypeFilter, detailsOpen, setDetailsOpen } = useViewPrefs();
   const { pins, togglePin } = useNav();
   const { clipboard, copyToClipboard, cutToClipboard, clearClipboard } = useClipboard();
-  const { enqueueFiles } = useUploadActions();
+  const { enqueueFiles, uploadDropped } = useUploadActions();
   const favoriteIds = useFavoriteIds();
   const folderSizes = useFolderSizes(folderPath, !loading);
   const scroller = useMainScroller();
@@ -339,11 +339,11 @@ export function FileBrowser({
           if (e.altKey || e.ctrlKey) await copyItems(paths, folder.relativePath);
           else await moveItems(paths, folder.relativePath);
         } else if (e.dataTransfer.types.includes("Files")) {
-          enqueueFiles(await collectDroppedFiles(e.dataTransfer), folder.relativePath);
+          uploadDropped(e.dataTransfer, folder.relativePath);
         }
       },
     }),
-    [open, indexById, display, selected, enqueueFiles]
+    [open, indexById, display, selected, uploadDropped]
   );
 
   // ── keyboard ──
@@ -506,13 +506,13 @@ export function FileBrowser({
             e.dataTransfer.dropEffect = "copy";
           }
         },
-        onDrop: async (e: React.DragEvent) => {
+        onDrop: (e: React.DragEvent) => {
           if (!e.dataTransfer.types.includes("Files")) return;
           e.preventDefault();
           dragDepth.current = 0;
           setDropActive(false);
           if (!canWrite) return;
-          enqueueFiles(await collectDroppedFiles(e.dataTransfer), folderPath!);
+          uploadDropped(e.dataTransfer, folderPath!);
         },
       }
     : {};

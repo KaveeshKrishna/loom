@@ -4,13 +4,16 @@ A tour of what you can do once Loom is running. For installation see [INSTALLATI
 
 ## Uploading
 
-Drag files or whole folders onto any folder view, or use **New → Upload files / Upload folder**. Dropping files onto a folder tile uploads them into that folder.
+Drag files or whole folders onto any folder view, or use **New → Upload files / Upload folder**. Dropping files onto a folder tile uploads them into that folder. Loom asks before uploading anything you dropped ("Upload 3 files to Photos?"), so a stray drop never starts an upload.
 
 - **Progress.** The upload panel in the corner shows overall progress, speed and time remaining. You can minimize it to a small pill that keeps showing progress; click the pill to bring the panel back.
+- **Pause, resume, cancel.** Pause or cancel each file in the panel, or use **Pause all**, **Resume all** and **Cancel all**. A paused upload keeps what was already sent and continues from there.
 - **"Uploaded" means stored.** A file is marked Uploaded as soon as every byte is safely on disk and verified. Its thumbnail appears a few seconds later ("preview generating in background").
 - **Interruptions.** If your connection drops, uploads retry on their own. If you close the tab or the server loses power, the upload panel lists the unfinished uploads the next time you open Loom. Pick the same files again (in the same folder) within 24 hours to resume where they stopped, even from another browser, or click **Discard** to free the space. Unfinished files never show up in your folders.
 - **Files that already exist.** Before anything is sent, Loom asks what to do with each file that's already there: **Replace** (the old one goes to Trash), **Skip**, or **Keep both** (the new one becomes `name (1).ext`). Tick "Do this for the other N conflicts" to answer them all at once. Both files' size and date are shown, and probable duplicates are flagged.
 - **Resuming a folder upload.** After an interrupted folder upload, pick the same folder again and choose Skip for all. Only what's missing is uploaded, with no `photo (1).jpg` duplicates.
+- **Downloads** are run by your browser: pause or cancel them in its downloads list (Ctrl+J in most browsers). The [Loom apps](APPS.md) have their own downloads with pause and resume.
+- **When Loom is unreachable** (restarting after an update, or you're offline), a bar at the top says "Can't reach Loom. Reconnecting…" and disappears once it's back. If Loom was updated meanwhile, open pages reload themselves (after your uploads finish, if any are running).
 
 ## Selecting and organizing
 

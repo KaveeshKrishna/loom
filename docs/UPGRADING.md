@@ -70,6 +70,10 @@ docker compose ps        # wait until loom-web shows (healthy)
 
 ## Version notes
 
+### 2.2.2
+
+No manual steps: `./scripts/update.sh`. No migration. Pages that are open during the update reload themselves once it's done.
+
 ### 2.2.1
 
 No manual steps: `./scripts/update.sh`. No migration. Needed for Loom for Windows' upload and download menus to work inside the app.

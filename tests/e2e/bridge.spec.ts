@@ -4,6 +4,7 @@
  * records every call.
  */
 import { test, expect, type Page } from "@playwright/test";
+import { dropFiles } from "./helpers";
 
 type Call = [string, ...unknown[]];
 
@@ -29,6 +30,7 @@ async function withBridge(page: Page, capabilities: string[], opts: { version?: 
         appVersion: "1.0.0-test",
         capabilities: caps,
         uploadFiles: rec("uploadFiles", true),
+        uploadDropped: rec("uploadDropped", true),
         pickUpload: rec("pickUpload", true),
         download: rec("download", true),
         openTransfers: rec("openTransfers", true),
@@ -258,4 +260,29 @@ test("without the app there's no This PC section and folder menus offer the ZIP 
   await folder.click({ button: "right" });
   await expect(page.getByRole("menuitem", { name: "Download as ZIP" })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Download", exact: true })).toHaveCount(0);
+});
+
+test("dropped items go to the app as they are, after confirming", async ({ page }) => {
+  await withBridge(page, ["uploads.files", "uploads.dropped", "transfers"]);
+  await page.goto("/files/Documents");
+  const tile = page.locator('[aria-label="Notes.txt"]').first();
+  await expect(tile).toBeVisible();
+  await ready(page);
+  await dropFiles(page, tile, [
+    { name: "holiday.jpg", content: "jpeg" },
+    { name: "notes.md", content: "# notes" },
+  ]);
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("Upload to Documents?")).toBeVisible();
+  await dialog.getByRole("button", { name: "Upload" }).click();
+  await expect.poll(() => callsOf(page, "uploadDropped")).toHaveLength(1);
+  const [[, destDir, items, files]] = await callsOf(page, "uploadDropped");
+  expect(destDir).toBe("Documents");
+  expect(items).toEqual([
+    { name: "holiday.jpg", kind: "file" },
+    { name: "notes.md", kind: "file" },
+  ]);
+  expect(files).toEqual(["file:holiday.jpg:4", "file:notes.md:7"]);
+  // The page didn't upload them itself.
+  await expect(page.getByText(/Uploading \d+ file/)).toHaveCount(0);
 });

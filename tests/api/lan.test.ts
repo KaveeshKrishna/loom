@@ -10,6 +10,14 @@ import { Client, owner, pairApp, lanRequest, sha256, randomBytes, closeDb, fresh
 
 after(closeDb);
 
+test("health: the version and this build's id (open pages reload when it changes), never cached", async () => {
+  const r = await new Client().get("/api/health");
+  assert.equal(r.status, 200);
+  assert.equal(r.body.status, "ok");
+  assert.match(r.body.build, /^[0-9a-f]{16}$/);
+  assert.equal(r.headers.get("cache-control"), "no-store");
+});
+
 test("client info: public basics; the LAN address and CA only for signed-in callers", async () => {
   const anon = await new Client().get("/api/client/info");
   assert.equal(anon.status, 200);

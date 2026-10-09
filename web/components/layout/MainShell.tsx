@@ -14,6 +14,8 @@ import { GlobalSearchResults } from "@/components/files/GlobalSearchResults";
 import { Toaster } from "@/components/ui/Toaster";
 import { DialogHost } from "@/components/ui/Dialog";
 import { CollisionHost } from "@/components/files/CollisionDialog";
+import { UploadConfirmHost } from "@/components/files/UploadConfirm";
+import { ConnectionBanner } from "./ConnectionBanner";
 import { FolderPickerHost } from "@/components/files/FolderPicker";
 import { ShareHost } from "@/components/files/ShareDialog";
 import { registerPinUpdater } from "@/components/files/actions";
@@ -112,6 +114,7 @@ function MainShellInner({ children, userName, userEmail, isOwner }: MainShellPro
 
       {/* Main content */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+        <ConnectionBanner />
         <TopBar
           userName={userName}
           onMenuToggle={() => setMobileSidebarOpen(true)}
@@ -137,6 +140,7 @@ function MainShellInner({ children, userName, userEmail, isOwner }: MainShellPro
       <Toaster />
       <DialogHost />
       <CollisionHost />
+      <UploadConfirmHost />
       <FolderPickerHost />
       <ShareHost />
     </div>

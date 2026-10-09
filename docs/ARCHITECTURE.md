@@ -103,7 +103,8 @@ The apps show Loom's own web UI in a window and add a transfer engine and OS int
 - **Signing the app's window in.** The app asks for a one-time link (`POST /api/devices/web-login`); opening it sets a normal session cookie tied to the device and redirects into Loom. Links from other sites are refused.
 - **Limits of a device token.** It can't do Owner administration, manage devices, create pairing codes or share links; those need a browser sign-in, so a lost device can't mint more access.
 - **`GET /api/client/info`** gives apps the version, a stable instance id, capabilities and upload limits; signed-in apps also get the LAN address and its certificate.
-- **The page bridge.** When Loom runs inside an app, the app defines `window.LoomApp` before the page loads (`web/lib/client/native.ts` is the page's side). Uploads then go to the app after the usual conflict question, downloads to its download manager, and its progress shows as a pill. The page can only hand over files the user picked or dropped, never name a local path. On Windows the bridge is WebView2's message channel, checked against the server's origin; the page gets no other access to the app.
+- **The page bridge.** When Loom runs inside an app, the app defines `window.LoomApp` before the page loads (`web/lib/client/native.ts` is the page's side), listing its capabilities (`uploads.picker`, `uploads.files`, `uploads.dropped`, `downloads`, `downloads.zip`, `transfers`, `settings`). Picked files go to the app after the usual conflict question; dropped files and folders go as they are (the app walks folders and asks about conflicts itself); downloads go to its download manager; its progress shows as a pill and its Transfers and settings are in the sidebar. The page can only hand over files the user picked or dropped, never name a local path. Messages are JSON strings; each request carries an id and the app answers with a `loomapp:ack` event, and when it doesn't answer within a few seconds the page does the job itself (its own file picker, the browser's download) rather than doing nothing. The app also sends `loomapp:transfers` (progress), `loomapp:toast` (messages) and `loomapp:navigate`. On Windows the bridge is WebView2's message channel, checked against the server's origin; the page gets no other access to the app.
+- **App updates** come from GitHub Releases: release workflows publish signed packages and refresh small manifests (`windows.json`, `android.json`) in a rolling `updates` release that installed apps check. The server isn't involved.
 
 ### LAN access
 
@@ -114,6 +115,8 @@ Optional (`./scripts/lan.sh enable`): a small Caddy (`loom-lan`, compose profile
 Whenever the index changes, the web app or the scanner publishes a small event on the Postgres channel `loom_events`, saying which folders changed and optionally which files. Examples: an upload finishing, a thumbnail becoming ready, another user renaming something.
 
 The web process keeps one listening connection and forwards events to every open tab through `/api/events` (Server-Sent Events), filtered by each user's permissions. Pages reload only the folder that changed, without a spinner. If a proxy buffers or blocks the stream, pages fall back to light polling while thumbnails are still being generated.
+
+When the stream drops for more than a few seconds, pages show a "reconnecting" bar and ask `/api/health` every few seconds until Loom answers. `/api/health` includes a build id (a hash of the web app's source, set in `next.config.ts`); if it differs from the one the page was built with, Loom was updated in the meantime and the page reloads itself, unless uploads from that page are still running.
 
 ## Deduplicating by content
 

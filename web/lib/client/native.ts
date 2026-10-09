@@ -27,9 +27,11 @@ import { useEffect, useState } from "react";
 import { toast } from "@/components/ui/Toaster";
 
 export type NativeCapability =
-  | "uploads.files" // uploadFiles(): files picked/dropped in the page
+  | "uploads.files" // uploadFiles(): files picked in the page
+  | "uploads.dropped" // uploadDropped(): what was dropped on the page, folders included (the app walks them)
   | "uploads.picker" // pickUpload(): the app's own file/folder picker
   | "downloads" // download(): the app's download manager
+  | "downloads.zip" // download({ zip: true }): the app makes the ZIP download too (a WebView can't do the page's form-post one)
   | "transfers" // openTransfers() + "loomapp:transfers" events
   | "settings"; // openSettings(): the app's own settings
 
@@ -51,8 +53,9 @@ export interface LoomAppBridge {
   appVersion: string;
   capabilities: NativeCapability[];
   uploadFiles?(destDir: string, items: NativeUploadItem[], files: File[]): BridgeResult;
+  uploadDropped?(destDir: string, items: { name: string; kind: "file" | "folder" }[], files: File[]): BridgeResult;
   pickUpload?(destDir: string, mode: "files" | "folder"): BridgeResult;
-  download?(request: { items: NativeDownloadItem[] }): BridgeResult;
+  download?(request: { items: NativeDownloadItem[]; zip?: boolean }): BridgeResult;
   openTransfers?(): BridgeResult;
   openSettings?(): BridgeResult;
   /** The folder on screen (null when not in a folder), for "upload here" from the app */
@@ -154,6 +157,18 @@ export async function nativeUploadFiles(destDir: string, items: NativeUploadItem
 }
 
 /**
+ * Hand what was dropped (files and whole folders, as the browser's File
+ * objects) to the app, which reads them from disk itself. False: the page
+ * should upload them.
+ */
+export async function nativeUploadDropped(destDir: string, items: { name: string; kind: "file" | "folder" }[], files: File[]): Promise<boolean> {
+  const app = nativeApp();
+  if (!app?.uploadDropped || !hasNative("uploads.dropped")) return false;
+  const r = call(() => app.uploadDropped!(destDir, items, files));
+  return r !== false && (await answered("uploadDropped", r));
+}
+
+/**
  * Upload files or a folder: the app's own picker inside an app, `fallback`
  * (the page's file input) in a browser or when the app doesn't answer.
  */
@@ -172,10 +187,10 @@ export function pickForUpload(destDir: string, mode: "files" | "folder", fallbac
  * false when the browser should do it; `fallback` runs if the app was asked
  * but didn't answer.
  */
-export function nativeDownload(items: NativeDownloadItem[], fallback?: () => void): boolean {
+export function nativeDownload(items: NativeDownloadItem[], fallback?: () => void, opts: { zip?: boolean } = {}): boolean {
   const app = nativeApp();
-  if (!app?.download || !hasNative("downloads") || items.length === 0) return false;
-  const r = call(() => app.download!({ items }));
+  if (!app?.download || !hasNative(opts.zip ? "downloads.zip" : "downloads") || items.length === 0) return false;
+  const r = call(() => app.download!(opts.zip ? { items, zip: true } : { items }));
   if (r === false) return false;
   void answered("download", r).then((ok) => {
     if (ok) return;

@@ -19,9 +19,16 @@
  * State and actions live in separate contexts so pages that only need
  * enqueueFiles() don't re-render on every progress tick.
  *
+ * Uploads can be paused and resumed (the session stays on the server, so
+ * resuming continues from the last stored byte) or cancelled.
+ *
+ * Dropped files and folders are confirmed first ("Upload 3 files to
+ * Photos?"); picked ones aren't, since the picker was the choice.
+ *
  * Inside a Loom app (lib/client/native.ts) the files go to the app's own
- * transfer manager after the conflict dialog, instead of being sent from
- * this page.
+ * transfer manager instead of being sent from this page: dropped items as
+ * they are (the app walks folders itself), picked files after the conflict
+ * dialog.
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -29,9 +36,11 @@ import { emitDirChange, useChangeReason } from "@/lib/client/live";
 import { parentOf } from "@/lib/client/api";
 import { resolveConflicts, type ConflictInfo } from "@/components/files/CollisionDialog";
 import { toast } from "@/components/ui/Toaster";
-import { hasNative, nativeUploadFiles } from "@/lib/client/native";
+import { hasNative, nativeUploadDropped, nativeUploadFiles } from "@/lib/client/native";
+import { confirmUpload } from "@/components/files/UploadConfirm";
+import { collectDroppedFiles, takeDropped } from "@/lib/client/drop";
 
-export type UploadStatus = "pending" | "uploading" | "finalizing" | "done" | "error" | "cancelled";
+export type UploadStatus = "pending" | "uploading" | "paused" | "finalizing" | "done" | "error" | "cancelled";
 
 export interface UploadEntry {
   id: string;
@@ -67,7 +76,15 @@ export interface UnfinishedUpload {
 
 interface UploadActions {
   enqueueFiles: (files: { file: File; relativePath: string }[], destDir: string) => void;
+  /** Files and folders dropped on the page (call from the drop handler itself): asks first. */
+  uploadDropped: (dt: DataTransfer, destDir: string) => void;
   cancelUpload: (id: string) => void;
+  /** Stop sending; the server keeps what it has, resumeUpload continues from there. */
+  pauseUpload: (id: string) => void;
+  resumeUpload: (id: string) => void;
+  pauseAll: () => void;
+  resumeAll: () => void;
+  cancelAll: () => void;
   retryUpload: (id: string) => void;
   dismissUpload: (id: string) => void;
   clearCompleted: () => void;
@@ -200,6 +217,8 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const queue = useRef<string[]>([]);
   const entries = useRef(new Map<string, UploadEntry>());
   const controllers = useRef(new Map<string, AbortController>());
+  /** Uploads being paused: their abort means "paused", not "cancelled". */
+  const pausing = useRef(new Set<string>());
   const active = useRef(0);
   const changedDirs = useRef(new Set<string>());
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -232,6 +251,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       const key = resumeKey(entry);
       update(id, { status: "uploading", error: undefined });
       let activeSid: string | null = null;
+      let paused = false;
 
       try {
         // Resume an earlier session for this exact file, if the server still has it.
@@ -361,13 +381,16 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         announce(parentOf(String(result.path)));
       } catch (err) {
         if ((err as Error).name === "AbortError") {
-          update(id, { status: "cancelled", error: undefined });
+          paused = pausing.current.has(id);
+          update(id, { status: paused ? "paused" : "cancelled", error: undefined, speed: 0 });
         } else {
           update(id, { status: "error", error: (err as Error).message || "Upload failed" });
         }
       } finally {
         controllers.current.delete(id);
-        if (activeSid) activeSessions.current.delete(activeSid);
+        pausing.current.delete(id);
+        // A paused upload's session is still this tab's (not "unfinished").
+        if (activeSid && !paused) activeSessions.current.delete(activeSid);
       }
     },
     [update, announce]
@@ -499,16 +522,99 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const cancelUpload = useCallback((id: string) => {
     const e = entries.current.get(id);
     if (!e) return;
+    pausing.current.delete(id);
     controllers.current.get(id)?.abort();
     queue.current = queue.current.filter((q) => q !== id);
-    if (e.status === "pending") update(id, { status: "cancelled" });
+    if (e.status === "pending" || e.status === "paused") update(id, { status: "cancelled", speed: 0 });
     // Tell the server to discard the partial data.
     const sid = loadResumeMap()[resumeKey(e)];
     if (sid) {
+      activeSessions.current.delete(sid);
       saveResume(resumeKey(e), null);
       fetch(`/api/upload/sessions/${sid}`, { method: "DELETE" }).catch(() => {});
     }
   }, [update]);
+
+  const pauseUpload = useCallback(
+    (id: string) => {
+      const e = entries.current.get(id);
+      if (!e) return;
+      if (e.status === "pending") {
+        queue.current = queue.current.filter((q) => q !== id);
+        update(id, { status: "paused" });
+      } else if (e.status === "uploading") {
+        pausing.current.add(id);
+        controllers.current.get(id)?.abort();
+      }
+    },
+    [update]
+  );
+
+  const resumeUpload = useCallback(
+    (id: string) => {
+      const e = entries.current.get(id);
+      if (!e || e.status !== "paused") return;
+      update(id, { status: "pending", error: undefined });
+      queue.current.push(id);
+      pump();
+    },
+    [update, pump]
+  );
+
+  const pauseAll = useCallback(() => {
+    for (const e of entries.current.values()) if (e.status === "pending" || e.status === "uploading") pauseUpload(e.id);
+  }, [pauseUpload]);
+
+  const resumeAll = useCallback(() => {
+    for (const e of entries.current.values()) if (e.status === "paused") resumeUpload(e.id);
+  }, [resumeUpload]);
+
+  const cancelAll = useCallback(() => {
+    for (const e of entries.current.values()) if (e.status === "pending" || e.status === "uploading" || e.status === "paused") cancelUpload(e.id);
+  }, [cancelUpload]);
+
+  const uploadDropped = useCallback(
+    (dt: DataTransfer, destDir: string) => {
+      // Read the drop now: the browser forgets its contents once the drop event is over.
+      const dropped = takeDropped(dt);
+      if (dropped.items.length === 0) return;
+      const destLabel = destDir ? destDir.split("/").pop()! : "Home";
+      void (async () => {
+        // In an app that takes dropped items as they are: confirm, then hand them over.
+        if (hasNative("uploads.dropped") && dropped.files.length === dropped.items.length) {
+          const folders = dropped.items.filter((i) => i.isDirectory);
+          const ok = await confirmUpload({
+            destLabel,
+            names: dropped.items.map((i) => ({ name: i.name, folder: i.isDirectory })),
+            files: dropped.items.length - folders.length,
+            folders: folders.length,
+            bytes: dropped.items.reduce((s, i) => s + (i.isDirectory ? 0 : i.size), 0),
+            folderSizesKnown: folders.length === 0,
+          });
+          if (!ok) return;
+          if (await nativeUploadDropped(destDir, dropped.items.map((i) => ({ name: i.name, kind: i.isDirectory ? "folder" : "file" })), dropped.files)) return;
+          // The app didn't take them: upload from this page instead (already confirmed).
+          const list = await collectDroppedFiles(dropped);
+          if (list.length) enqueueFiles(list, destDir);
+          return;
+        }
+        const list = await collectDroppedFiles(dropped);
+        if (list.length === 0) return;
+        const folders = dropped.items.filter((i) => i.isDirectory).length;
+        const ok = await confirmUpload({
+          destLabel,
+          names: dropped.items.map((i) => ({ name: i.name, folder: i.isDirectory })),
+          files: list.length,
+          folders,
+          bytes: list.reduce((s, f) => s + f.file.size, 0),
+          folderSizesKnown: true,
+          filesInFolders: folders > 0,
+        });
+        if (ok) enqueueFiles(list, destDir);
+      })();
+    },
+    [enqueueFiles]
+  );
 
   const retryUpload = useCallback(
     (id: string) => {
@@ -528,7 +634,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
   const clearCompleted = useCallback(() => {
     setUploads((prev) => {
-      const keep = prev.filter((u) => u.status === "uploading" || u.status === "pending" || u.status === "finalizing");
+      const keep = prev.filter((u) => u.status === "uploading" || u.status === "pending" || u.status === "paused" || u.status === "finalizing");
       for (const u of prev) if (!keep.includes(u)) entries.current.delete(u.id);
       return keep;
     });
@@ -565,8 +671,22 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   }, [busy]);
 
   const actions = useMemo<UploadActions>(
-    () => ({ enqueueFiles, cancelUpload, retryUpload, dismissUpload, clearCompleted, setVisible, discardUnfinished }),
-    [enqueueFiles, cancelUpload, retryUpload, dismissUpload, clearCompleted, discardUnfinished]
+    () => ({
+      enqueueFiles,
+      uploadDropped,
+      cancelUpload,
+      pauseUpload,
+      resumeUpload,
+      pauseAll,
+      resumeAll,
+      cancelAll,
+      retryUpload,
+      dismissUpload,
+      clearCompleted,
+      setVisible,
+      discardUnfinished,
+    }),
+    [enqueueFiles, uploadDropped, cancelUpload, pauseUpload, resumeUpload, pauseAll, resumeAll, cancelAll, retryUpload, dismissUpload, clearCompleted, discardUnfinished]
   );
   const state = useMemo<UploadState>(() => ({ uploads, isVisible, unfinished }), [uploads, isVisible, unfinished]);
 
