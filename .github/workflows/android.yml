@@ -93,6 +93,9 @@ jobs:
     name: On ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      # The emulator reaches the runner as 10.0.2.2 (adb reverse garbles bigger responses).
+      LOOM_TEST_PUBLIC_URL: http://10.0.2.2:18085
     strategy:
       fail-fast: false
       matrix:

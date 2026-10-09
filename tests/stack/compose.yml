@@ -18,8 +18,9 @@ x-env: &env
   NODE_ENV: production
   NEXT_TELEMETRY_DISABLED: "1"
   BETTER_AUTH_SECRET: loom-integration-tests-only-secret-0123456789abcdef
-  BETTER_AUTH_URL: http://localhost:${LOOM_TEST_PORT:-18085}
-  TRUSTED_ORIGINS: http://localhost:${LOOM_TEST_PORT:-18085}
+  # LOOM_TEST_PUBLIC_URL: the address clients use (Android emulators reach the host as 10.0.2.2).
+  BETTER_AUTH_URL: ${LOOM_TEST_PUBLIC_URL:-http://localhost:${LOOM_TEST_PORT:-18085}}
+  TRUSTED_ORIGINS: http://localhost:${LOOM_TEST_PORT:-18085},${LOOM_TEST_PUBLIC_URL:-http://localhost:${LOOM_TEST_PORT:-18085}}
   # Small chunks and a small write window keep the tests fast and let them
   # reach the limits.
   LOOM_UPLOAD_CHUNK_MB: "1"
