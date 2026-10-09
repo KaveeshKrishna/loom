@@ -6,8 +6,9 @@
  *   docker compose exec loom-web node scripts/reset-password.mjs you@example.com
  *
  * You'll be asked for the new password (it isn't echoed, and isn't left in
- * your shell history). The user is signed out everywhere. Anyone who can run
- * this already controls the server, so it grants nothing new.
+ * your shell history). The user is signed out everywhere, apps included.
+ * Anyone who can run this already controls the server, so it grants nothing
+ * new.
  *
  * The hash format matches Better Auth's (scrypt N=16384 r=16 p=1, 64 bytes,
  * "salt:key" in hex), so the normal sign-in accepts it.
@@ -76,6 +77,9 @@ async function main() {
         await tx.account.create({ data: { accountId: user.id, providerId: "credential", userId: user.id, password: hash } });
       }
       await tx.session.deleteMany({ where: { userId: user.id } });
+      // Paired apps too (lib/devices.ts). loom-web caches device lookups for
+      // up to 15 seconds, then they stop working.
+      await tx.device.deleteMany({ where: { userId: user.id } });
       await tx.auditLog.create({ data: { userId: user.id, action: "USER_UPDATED", details: { targetId: user.id, targetEmail: user.email, changed: ["password"], via: "reset-password script" } } });
     });
     console.log(`Password for ${user.email} (${user.role}) was reset. They've been signed out everywhere.`);

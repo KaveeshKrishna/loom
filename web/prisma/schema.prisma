@@ -33,6 +33,8 @@ model User {
   notifications  Notification[]
   uploadSessions UploadSession[]
   shareLinks     ShareLink[]
+  devices        Device[]
+  devicePairings DevicePairing[]
 
   @@map("users")
 }
@@ -44,12 +46,17 @@ model Session {
   expiresAt DateTime
   ipAddress String?
   userAgent String?
+  // The app whose embedded browser this session belongs to (lib/devices.ts);
+  // removing the app signs it out too. Null for normal browser sign-ins.
+  deviceId  String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device    Device?  @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([deviceId])
   @@map("sessions")
 }
 
@@ -447,9 +454,14 @@ model BackgroundJob {
 
 // ─────────────────────────────────────────────
 // UPLOAD SESSIONS
-// One row per in-progress chunked upload. Bytes are appended to
-// /media/.tmp-upload/{id}.partial; `received` always equals the partial
-// file's size after each accepted chunk, which makes resuming idempotent.
+// One row per in-progress chunked upload, written to
+// /media/.tmp-upload/{id}.partial. Two modes:
+//  mode = "stream" — chunks arrive in order (the browser); `received` always
+//                    equals the partial file's size after each accepted
+//                    chunk, which makes resuming idempotent.
+//  mode = "chunks" — chunks of `chunkSize` arrive in any order, several at
+//                    once (the apps); `chunkMap` has one bit per chunk
+//                    received and `received` counts their bytes.
 // Expired sessions (and their partial files) are purged by the scanner.
 // ─────────────────────────────────────────────
 
@@ -466,13 +478,28 @@ model UploadSession {
   // and videos keep their original dates.
   lastModified BigInt?
   mimeType     String?
+  mode         String   @default("stream")
+  // Fixed when the session is created (mode "chunks"); null = the server's
+  // current chunk size.
+  chunkSize    Int?
+  chunkMap     Bytes?
+  // Chosen by the app, so a retried "create" returns the same session.
+  clientRef    String?
+  // The app that created the session (null = the browser).
+  deviceId     String?
+  // The finished file (mode "chunks"), kept for a day so a repeated
+  // "complete" gets the same answer instead of an error.
+  result       Json?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   expiresAt    DateTime
 
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device       Device?  @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, clientRef])
   @@index([userId])
+  @@index([deviceId])
   @@index([expiresAt])
   @@map("upload_sessions")
 }
@@ -531,4 +558,67 @@ model Notification {
 
   @@index([userId, read])
   @@map("notifications")
+}
+
+// ─────────────────────────────────────────────
+// DEVICES (the Loom desktop and mobile apps)
+// A paired app calls the API with "Authorization: Bearer loomd_…". Only
+// SHA-256(token) is stored. Removing a device (or its user) cuts it off at
+// once; the Owner resetting a user's password removes their devices too.
+// ─────────────────────────────────────────────
+
+model Device {
+  id         String    @id @default(cuid())
+  userId     String
+  name       String
+  // "windows", "android", …
+  platform   String
+  appVersion String?
+  tokenHash  String    @unique
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime?
+  lastIp     String?
+
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions   Session[]
+  uploads    UploadSession[]
+
+  @@index([userId])
+  @@map("devices")
+}
+
+// A device being paired. Two ways in:
+//  kind = "approve" — the app starts a request; a signed-in user allows it on
+//                     /pair/<id>; the app polls with its secret.
+//  kind = "code"    — a signed-in user creates a one-time code (shown as a
+//                     QR code on the Devices page); the app redeems it.
+// The app may send the SHA-256 of a token it generated itself (tokenHash):
+// then no token crosses the wire, and a lost response can simply be retried.
+// Rows are short-lived (minutes) and deleted by the hourly housekeeping.
+model DevicePairing {
+  id         String    @id @default(cuid())
+  kind       String
+  // SHA-256 of the app's poll secret ("approve") or of the code ("code")
+  secretHash String    @unique
+  // Short code shown both in the app and on the approval page ("approve")
+  checkCode  String?
+  deviceName String?
+  platform   String?
+  appVersion String?
+  requestIp  String?
+  tokenHash  String?
+  // The device created from it, once claimed
+  deviceId   String?
+  // Who approved it ("approve") or created it ("code")
+  userId     String?
+  approvedAt DateTime?
+  deniedAt   DateTime?
+  consumedAt DateTime?
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+
+  user       User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("device_pairings")
 }

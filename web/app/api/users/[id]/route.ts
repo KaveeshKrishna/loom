@@ -3,12 +3,13 @@
  * DELETE /api/users/:id                             — Owner only
  *
  * Guards: the last Owner can't be demoted or deleted, and changing a
- * password signs that user out everywhere.
+ * password signs that user out everywhere (paired apps included).
  */
 import { NextResponse } from "next/server";
 import { hashPassword } from "better-auth/crypto";
 import { prisma } from "@/lib/prisma";
 import { route, requireOwner, readJson, badRequest, notFound } from "@/lib/http";
+import { forgetDeviceCache } from "@/lib/devices";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -44,9 +45,13 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
     const u = await tx.user.update({ where: { id }, data, select: { id: true, name: true, email: true, role: true } });
     if (newHash) {
       await tx.account.updateMany({ where: { userId: id, providerId: "credential" }, data: { password: newHash } });
-      // Sign the user out everywhere (except the Owner's own current session
-      // when they change their own password — they stay signed in here).
-      if (id !== owner.id) await tx.session.deleteMany({ where: { userId: id } });
+      // Sign the user out everywhere, apps included (except when the Owner
+      // changes their own password — they stay signed in, here and in their
+      // apps; Devices lists those to remove one by one).
+      if (id !== owner.id) {
+        await tx.session.deleteMany({ where: { userId: id } });
+        await tx.device.deleteMany({ where: { userId: id } });
+      }
     }
     await tx.auditLog.create({
       data: {
@@ -57,6 +62,7 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
     });
     return u;
   });
+  if (newHash) forgetDeviceCache();
   return NextResponse.json({ user });
 });
 
@@ -70,13 +76,14 @@ export const DELETE = route<Ctx>(async (_req, { params }) => {
     const owners = await prisma.user.count({ where: { role: "OWNER" } });
     if (owners <= 1) throw badRequest("There must always be at least one Owner");
   }
-  // Sessions, accounts, ACL rules, favorites, uploads and notifications
-  // cascade; trash items they deleted stay (deletedByUserId -> null).
+  // Sessions, accounts, devices, ACL rules, favorites, uploads and
+  // notifications cascade; trash items they deleted stay (deletedByUserId -> null).
   await prisma.$transaction([
     prisma.user.delete({ where: { id } }),
     prisma.auditLog.create({
       data: { userId: owner.id, action: "USER_DELETED", details: { targetId: id, targetEmail: target.email } },
     }),
   ]);
+  forgetDeviceCache(); // their paired apps (cascaded) stop working right away
   return NextResponse.json({ success: true });
 });

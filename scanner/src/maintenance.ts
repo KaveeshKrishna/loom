@@ -146,7 +146,7 @@ export async function runOrphanGC() {
   return result;
 }
 
-/** Old job rows and audit entries. */
+/** Old job rows, audit entries, read notifications and expired app pairing requests. */
 export async function pruneHistory() {
   const now = Date.now();
   await prisma.scanJob.deleteMany({ where: { type: "PROCESS_FILE", status: "COMPLETED", completedAt: { lt: new Date(now - DAY) } } });
@@ -160,6 +160,8 @@ export async function pruneHistory() {
   if (oldRescans.length) await prisma.scanJob.deleteMany({ where: { id: { in: oldRescans.map((j) => j.id) } } });
   await prisma.auditLog.deleteMany({ where: { timestamp: { lt: new Date(now - AUDIT_RETENTION_DAYS * DAY) } } });
   await prisma.notification.deleteMany({ where: { read: true, createdAt: { lt: new Date(now - 30 * DAY) } } });
+  // App pairing requests are valid for minutes (web/lib/devices.ts).
+  await prisma.devicePairing.deleteMany({ where: { expiresAt: { lt: new Date(now - 3_600_000) } } });
 }
 
 export async function runMaintenance() {

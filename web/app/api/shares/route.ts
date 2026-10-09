@@ -5,7 +5,7 @@
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { route, requireUser, readJson, badRequest, forbidden, notFound, HttpError } from "@/lib/http";
+import { route, requireUser, requireBrowserUser, readJson, badRequest, forbidden, notFound, HttpError } from "@/lib/http";
 import { getAcl } from "@/lib/acl";
 import { isSharingEnabled, newToken, hashToken, encryptToken, decryptToken, hashSharePassword, shareUrl } from "@/lib/shares";
 
@@ -56,7 +56,8 @@ export const GET = route(async (req) => {
 });
 
 export const POST = route(async (req) => {
-  const user = await requireUser();
+  // Public links are created from a browser session, not with an app's token.
+  const user = await requireBrowserUser();
   if (!(await isSharingEnabled())) throw new HttpError(403, "Share links are turned off. The Owner can enable them in Settings → Sharing.");
   const body = await readJson<{ fileNodeId?: string; expiresInDays?: unknown; password?: unknown; allowDownload?: unknown }>(req);
   if (typeof body.fileNodeId !== "string") throw badRequest("fileNodeId is required");

@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { route, requireUser } from "@/lib/http";
 import { MEDIA_ROOT } from "@/lib/path-security";
 import { CACHE_ROOT } from "@/lib/cache-access";
+import { UNFINISHED } from "@/lib/uploads";
 
 async function disk(path: string) {
   try {
@@ -42,7 +43,7 @@ export const GET = route(async () => {
     breakdown = Object.fromEntries(rows.map((r) => [r.cat, { bytes: r.bytes.toString(), files: Number(r.files) }]));
     const t = await prisma.fileNode.aggregate({ _sum: { size: true }, where: { inTrash: true, type: "FILE" } });
     trashBytes = (t._sum.size ?? BigInt(0)).toString();
-    const u = await prisma.uploadSession.aggregate({ _sum: { received: true }, _count: { _all: true } });
+    const u = await prisma.uploadSession.aggregate({ _sum: { received: true }, _count: { _all: true }, where: UNFINISHED });
     unfinishedUploads = { count: u._count._all, bytes: (u._sum.received ?? BigInt(0)).toString() };
   }
   return NextResponse.json({ media, cache, breakdown, trashBytes, unfinishedUploads }, { headers: { "Cache-Control": "private, max-age=60" } });

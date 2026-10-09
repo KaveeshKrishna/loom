@@ -5,13 +5,13 @@
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { route, requireUser, readJson, badRequest, forbidden, notFound } from "@/lib/http";
+import { route, requireBrowserUser, readJson, badRequest, forbidden, notFound } from "@/lib/http";
 import { hashSharePassword } from "@/lib/shares";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 async function own(id: string) {
-  const user = await requireUser();
+  const user = await requireBrowserUser();
   const link = await prisma.shareLink.findUnique({ where: { id }, include: { fileNode: { select: { relativePath: true } } } });
   if (!link) throw notFound("Link not found");
   if (user.role !== "OWNER" && link.createdById !== user.id) throw forbidden();

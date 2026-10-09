@@ -21,37 +21,43 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { PathSecurityError } from "@/lib/path-security";
 import { FsLockError } from "@/lib/fs-locks";
+import { HttpError, forbidden, badRequest } from "@/lib/http-errors";
+import { bearerToken, clientIp, deviceForToken } from "@/lib/devices";
 
 export interface SessionUser {
   id: string;
   email: string;
   name: string;
   role: Role;
+  /** Set when the caller is a paired app using its device token (lib/devices.ts). */
+  deviceId?: string;
 }
 
-export class HttpError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-    public extra?: Record<string, unknown>
-  ) {
-    super(message);
-    this.name = "HttpError";
-  }
-}
-
-export const badRequest = (msg: string) => new HttpError(400, msg);
-export const forbidden = (msg = "Access denied") => new HttpError(403, msg);
-export const notFound = (msg = "Not found") => new HttpError(404, msg);
-export const conflict = (msg: string, extra?: Record<string, unknown>) =>
-  new HttpError(409, msg, extra);
+export { HttpError, badRequest, forbidden, notFound, conflict } from "@/lib/http-errors";
 
 /**
  * Returns the signed-in user with their role read fresh from the database
  * (never trusted from the session payload), or null.
+ *
+ * A paired app authenticates with `Authorization: Bearer loomd_…` instead of
+ * a cookie; an unknown or removed device token is never retried as a cookie.
+ * Requests through the LAN listener (marked X-Loom-Via: lan by its proxy)
+ * only accept device tokens: no browser sessions over the local network.
  */
 export async function getSessionUser(): Promise<SessionUser | null> {
-  const session = await auth.api.getSession({ headers: await headers() });
+  const h = await headers();
+  const bearer = bearerToken(h);
+  if (!bearer && h.get("x-loom-via") === "lan") return null;
+  if (bearer) {
+    const device = await deviceForToken(bearer, clientIp(h));
+    if (!device) return null;
+    const user = await prisma.user.findUnique({
+      where: { id: device.userId },
+      select: { id: true, email: true, name: true, role: true },
+    });
+    return user ? { ...user, deviceId: device.id } : null;
+  }
+  const session = await auth.api.getSession({ headers: h });
   if (!session?.user?.id) return null;
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
@@ -66,10 +72,34 @@ export async function requireUser(): Promise<SessionUser> {
   return user;
 }
 
+/**
+ * Owner-only administration (users, permissions, scanner, …) needs a real
+ * sign-in: an app's device token is refused even when it belongs to the
+ * Owner, so a lost phone can't be used to change who has access.
+ */
 export async function requireOwner(): Promise<SessionUser> {
   const user = await requireUser();
   if (user.role !== "OWNER") throw forbidden("Owner only");
+  if (user.deviceId) throw forbidden("Sign in to Loom in a browser to change this setting");
   return user;
+}
+
+/**
+ * The caller must be signed in through a browser, not an app's device token:
+ * managing devices, creating pairing codes and share links. A lost phone's
+ * token can't be used to mint more access.
+ */
+export async function requireBrowserUser(): Promise<SessionUser> {
+  const user = await requireUser();
+  if (user.deviceId) throw forbidden("Do this from Loom in a browser");
+  return user;
+}
+
+/** The caller must be a paired app (device token). */
+export async function requireDevice(): Promise<SessionUser & { deviceId: string }> {
+  const user = await requireUser();
+  if (!user.deviceId) throw new HttpError(401, "This endpoint is for the Loom apps");
+  return user as SessionUser & { deviceId: string };
 }
 
 /** Map any thrown value to a JSON response without leaking internals. */

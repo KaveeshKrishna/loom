@@ -1,20 +1,24 @@
 /**
  * POST /api/upload/sessions
- *   { destDir, relativePath, size, lastModified?, mimeType? }
- *   → { id, chunkSize, received }
+ *   { destDir, relativePath, size, lastModified?, mimeType?, mode?, clientRef? }
+ *   → { id, chunkSize, received, … }
+ *   mode "chunks" (the apps) accepts numbered chunks in any order; clientRef
+ *   makes a retried create return the same session. See lib/uploads.ts.
  *
- * GET /api/upload/sessions — the caller's unfinished uploads (for resuming).
+ * GET /api/upload/sessions — the caller's unfinished uploads (for resuming):
+ *   a browser sees the browser's, an app sees its own.
  *
  * DELETE /api/upload/sessions?stale=1 — discard unfinished uploads nobody
  *   has touched for 10 minutes (the Owner: everyone's; others: their own),
- *   freeing their disk space now instead of after 24 hours.
+ *   freeing their disk space now instead of after 24 hours. Uploads the apps
+ *   started are left alone: they may just be paused, and the app manages them.
  *
  * See lib/uploads.ts for the whole protocol.
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { route, requireUser, readJson, badRequest } from "@/lib/http";
-import { createUploadSession, sessionJson, cancelUpload } from "@/lib/uploads";
+import { createUploadSession, sessionJson, cancelUpload, UNFINISHED } from "@/lib/uploads";
 
 export const POST = route(async (req) => {
   const user = await requireUser();
@@ -26,7 +30,7 @@ export const POST = route(async (req) => {
 export const GET = route(async () => {
   const user = await requireUser();
   const sessions = await prisma.uploadSession.findMany({
-    where: { userId: user.id, expiresAt: { gt: new Date() } },
+    where: { userId: user.id, deviceId: user.deviceId ?? null, expiresAt: { gt: new Date() }, ...UNFINISHED },
     orderBy: { createdAt: "desc" },
     take: 500,
   });
@@ -39,6 +43,8 @@ export const DELETE = route(async (req) => {
   const sessions = await prisma.uploadSession.findMany({
     where: {
       updatedAt: { lt: new Date(Date.now() - 10 * 60_000) },
+      deviceId: null,
+      ...UNFINISHED,
       ...(user.role === "OWNER" ? {} : { userId: user.id }),
     },
   });
