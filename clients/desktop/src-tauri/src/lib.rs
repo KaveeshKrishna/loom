@@ -124,8 +124,36 @@ fn upload_args(argv: &[String]) -> Vec<PathBuf> {
     }
 }
 
+/// Left just before an update installs. The installer restarts Loom with the
+/// arguments it was started with (e.g. "--upload <files>" from File
+/// Explorer); the restarted Loom reads this once and ignores them instead.
+pub fn update_marker() -> Option<PathBuf> {
+    dirs::data_local_dir().map(|d| d.join("app.loom.desktop").join("just-updated.json"))
+}
+
+/// The note from an update that just installed (read once, then removed).
+fn take_update_marker() -> Option<serde_json::Value> {
+    let path = update_marker()?;
+    let text = std::fs::read_to_string(&path).ok()?;
+    let _ = std::fs::remove_file(&path);
+    let note: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let age = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs().saturating_sub(note["at"].as_u64()?);
+    (age < 15 * 60).then_some(note)
+}
+
 pub fn run() {
-    let argv: Vec<String> = std::env::args().collect();
+    let after_update = take_update_marker();
+    let argv: Vec<String> = match &after_update {
+        // Restarted by the update's installer: start as if from the Start menu.
+        Some(note) => {
+            let mut a = vec![std::env::args().next().unwrap_or_default()];
+            if !note["mainVisible"].as_bool().unwrap_or(false) {
+                a.push("--hidden".into());
+            }
+            a
+        }
+        None => std::env::args().collect(),
+    };
     let self_test = self_test::args(&argv);
     let mut builder = tauri::Builder::default();
     if self_test.is_none() {
@@ -173,6 +201,9 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 if configured && start_engine(&a2).await {
                     apply_windows_settings(&a2);
+                    if after_update.is_some() {
+                        let _ = a2.handle.notification().builder().title(format!("Loom was updated to {VERSION}")).body("Transfers continue where they were.").show();
+                    }
                     if !uploads.is_empty() {
                         queue_upload_paths(&a2, uploads, None);
                     } else if !hidden {

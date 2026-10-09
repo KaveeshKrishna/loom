@@ -200,6 +200,12 @@ pub async fn install(a: &AppRef) -> Result<(), String> {
     if let Some(e) = a.engine() {
         e.shutdown().await;
     }
+    // For the restarted Loom (see crate::update_marker).
+    if let Some(path) = crate::update_marker() {
+        let note = serde_json::json!({ "from": crate::VERSION, "to": update.version, "at": now(), "mainVisible": crate::visible_main(a).is_some() });
+        let _ = std::fs::create_dir_all(path.parent().unwrap_or(&path));
+        let _ = std::fs::write(&path, note.to_string());
+    }
     // On Windows this exits the app; the installer starts Loom again.
     update.install(bytes).map_err(|e| {
         let msg = friendly(&e.to_string());
