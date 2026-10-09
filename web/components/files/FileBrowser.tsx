@@ -23,13 +23,13 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Download, FolderInput, Copy, Star, Trash2, X, CheckSquare, Edit2, Scissors, ClipboardPaste, Info, Pin, PinOff,
   FolderOpen, ExternalLink, UploadCloud, FolderUp, FolderPlus, FilePlus, Plus, ArrowUpDown, SlidersHorizontal, Folder,
-  AlertTriangle, Search, Share2,
+  AlertTriangle, Search, Share2, FileArchive,
 } from "lucide-react";
 import { cn, formatBytes, sortNodes, matchesTypeFilter } from "@/lib/utils";
 import { filesHref, parentOf } from "@/lib/client/api";
 import type { LNode } from "@/lib/client/types";
 import { collectDroppedFiles, LOOM_DRAG_TYPE } from "@/lib/client/drop";
-import { nativePickUpload, useNativeLocation } from "@/lib/client/native";
+import { pickForUpload, hasNative, useNativeLocation } from "@/lib/client/native";
 import { useFavoriteIds, useFolderSizes, setFavoriteLocal } from "@/lib/client/hooks";
 import { useViewPrefs, useNav, type SortKey, type TypeFilter } from "@/components/layout/TopBarContext";
 import { useClipboard } from "@/components/layout/ClipboardContext";
@@ -159,10 +159,10 @@ export function FileBrowser({
   const folderInput = useRef<HTMLInputElement>(null);
   // Inside a Loom app, its own picker replaces the page's file inputs.
   const chooseUploadFiles = useCallback(() => {
-    if (!nativePickUpload(folderPath ?? "", "files")) fileInput.current?.click();
+    pickForUpload(folderPath ?? "", "files", () => fileInput.current?.click());
   }, [folderPath]);
   const chooseUploadFolder = useCallback(() => {
-    if (!nativePickUpload(folderPath ?? "", "folder")) folderInput.current?.click();
+    pickForUpload(folderPath ?? "", "folder", () => folderInput.current?.click());
   }, [folderPath]);
   useNativeLocation(folderPath, folderPath != null && canWrite);
 
@@ -250,11 +250,17 @@ export function FileBrowser({
       const items: MenuItem[] = [];
       if (!multi) items.push({ label: isDir ? "Open" : "Open preview", icon: <FolderOpen size={15} />, onClick: () => open(node) });
       if (!multi && showPath) items.push({ label: "Show in folder", icon: <ExternalLink size={15} />, onClick: () => router.push(filesHref(parentOf(node.relativePath))) });
-      items.push({
-        label: multi || isDir ? "Download as ZIP" : "Download",
-        icon: <Download size={15} />,
-        onClick: () => downloadItems(targets),
-      });
+      if (hasNative("downloads")) {
+        // Inside an app: its download manager (resumable, folders stay folders), or one ZIP.
+        items.push({ label: "Download", icon: <Download size={15} />, onClick: () => downloadItems(targets) });
+        if (multi || isDir) items.push({ label: "Download as ZIP", icon: <FileArchive size={15} />, onClick: () => downloadItems(targets, { zip: true }) });
+      } else {
+        items.push({
+          label: multi || isDir ? "Download as ZIP" : "Download",
+          icon: <Download size={15} />,
+          onClick: () => downloadItems(targets),
+        });
+      }
       if (!multi) items.push({ label: "Share link…", icon: <Share2 size={15} />, onClick: () => openShareDialog(node) });
       if (!multi) items.push({ label: "Rename", icon: <Edit2 size={15} />, onClick: () => setRenamingId(node.id), shortcut: "F2", separatorBefore: true });
       items.push(

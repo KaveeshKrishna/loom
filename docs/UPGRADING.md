@@ -70,6 +70,10 @@ docker compose ps        # wait until loom-web shows (healthy)
 
 ## Version notes
 
+### 2.2.1
+
+No manual steps: `./scripts/update.sh`. No migration. Needed for Loom for Windows' upload and download menus to work inside the app.
+
 ### 2.2.0
 
 No manual steps: `./scripts/update.sh`. A migration adds the devices tables and new upload columns. Optional afterwards: turn on LAN access for the apps with `./scripts/lan.sh enable` ([docs/APPS.md](APPS.md#lan-access-server-side)), and, behind Cloudflare Tunnel, pass on visitors' real addresses ([REVERSE-PROXY.md](REVERSE-PROXY.md#cloudflare-tunnel)).

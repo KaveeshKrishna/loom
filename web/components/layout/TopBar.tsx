@@ -3,10 +3,10 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Search, Grid3X3, List, Menu, SunMedium, Moon, Monitor, LogOut, ChevronDown, Globe, FolderSearch, X, Bell, CheckCircle2, AlertCircle, MonitorSmartphone, ArrowDownUp } from "lucide-react";
+import { Search, Grid3X3, List, Menu, SunMedium, Moon, Monitor, LogOut, ChevronDown, Globe, FolderSearch, X, Bell, CheckCircle2, AlertCircle, MonitorSmartphone, ArrowDownUp, SlidersHorizontal } from "lucide-react";
 import { cn, truncateName } from "@/lib/utils";
 import { signOut } from "@/lib/auth-client";
-import { nativeApp, hasNative } from "@/lib/client/native";
+import { nativeApp, hasNative, openNativeWindow } from "@/lib/client/native";
 import type { Notification } from "@prisma/client";
 
 
@@ -188,7 +188,11 @@ export function TopBar({ onMenuToggle, userName }: TopBarProps) {
   const handleSignOut = async () => {
     await signOut();
     // Inside a Loom app, signing out of the page signs the app out too.
-    nativeApp()?.signedOut?.();
+    try {
+      nativeApp()?.signedOut?.();
+    } catch {
+      /* the app unpairs when its token stops working anyway */
+    }
     router.push("/login");
   };
 
@@ -527,12 +531,24 @@ export function TopBar({ onMenuToggle, userName }: TopBarProps) {
                   <button
                     onClick={() => {
                       setUserMenuOpen(false);
-                      nativeApp()?.openTransfers?.();
+                      openNativeWindow("transfers");
                     }}
                     className="flex items-center gap-2 w-full text-left px-2 py-2 text-sm hover:bg-[hsl(var(--accent))] rounded-md transition-colors"
                   >
                     <ArrowDownUp size={14} />
                     Transfers
+                  </button>
+                )}
+                {hasNative("settings") && (
+                  <button
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      openNativeWindow("settings");
+                    }}
+                    className="flex items-center gap-2 w-full text-left px-2 py-2 text-sm hover:bg-[hsl(var(--accent))] rounded-md transition-colors"
+                  >
+                    <SlidersHorizontal size={14} />
+                    App settings
                   </button>
                 )}
                 <Link

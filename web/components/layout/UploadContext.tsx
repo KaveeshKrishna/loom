@@ -463,12 +463,14 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           const d = decisions[f.relativePath];
           return d === "replace" || d === "keep_both" ? d : fallback;
         };
-        if (hasNative("uploads.files")) {
-          nativeUploadFiles(
+        if (
+          hasNative("uploads.files") &&
+          (await nativeUploadFiles(
             destDir,
             chosen.map((f) => ({ relativePath: f.relativePath, size: f.file.size, lastModified: f.file.lastModified, conflict: conflictOf(f) })),
             chosen.map((f) => f.file)
-          );
+          ))
+        ) {
           return;
         }
         const added: UploadEntry[] = chosen.map((f) => {

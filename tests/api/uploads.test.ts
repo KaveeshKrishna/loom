@@ -362,3 +362,42 @@ test("removing an app cancels its unfinished uploads", async () => {
   await o.del(`/api/devices/${deviceId}`);
   assert.equal((await sql(`SELECT 1 FROM upload_sessions WHERE id = $1`, [s.id])).length, 0);
 });
+
+test("chunks: an app's upload is announced live to open browsers, like a browser upload", async () => {
+  const o = await owner();
+  const { app } = await sharedApp(o);
+  const dir = await freshFolder(o);
+  // The browser's live-update stream (what refreshes the folder on screen).
+  const ac = new AbortController();
+  const res = await o.raw("GET", "/api/events", { headers: { accept: "text/event-stream" } });
+  assert.equal(res.status, 200);
+  const events: string[] = [];
+  const reading = (async () => {
+    const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+    ac.signal.addEventListener("abort", () => reader.cancel().catch(() => {}));
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        events.push(dec.decode(value));
+      }
+    } catch {
+      /* cancelled */
+    }
+  })();
+  await new Promise((r) => setTimeout(r, 300));
+  await chunkUpload(app, dir, "from-the-app.bin", randomBytes(MiB + 5));
+  const until = Date.now() + 10_000;
+  while (!events.join("").includes(`"${dir}"`) && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
+  ac.abort();
+  await reading;
+  const changed = events
+    .join("")
+    .split("\n")
+    .filter((l) => l.startsWith("data:"))
+    .map((l) => JSON.parse(l.slice(5)))
+    .find((e) => e.type === "changed" && e.dirs?.includes(dir));
+  assert.ok(changed, `no change event for ${dir}: ${events.join("")}`);
+  assert.ok(changed.nodeIds?.length >= 1, "names the new file");
+});

@@ -19,7 +19,7 @@ import { useUpload, type UploadEntry } from "./UploadContext";
 import { formatBytes } from "@/lib/utils";
 import { filesHref, parentOf } from "@/lib/client/api";
 import { Upload, X, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Minimize2, RotateCcw, Sparkles, Pause, Wifi } from "lucide-react";
-import { nativeApp, useNativeTransfers, type NativeTransfers } from "@/lib/client/native";
+import { openNativeWindow, useNativeTransfers, type NativeTransfers } from "@/lib/client/native";
 
 function formatEta(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return "";
@@ -100,7 +100,7 @@ function NativeTransfersPill({ t }: { t: NativeTransfers }) {
       : `${t.paused} paused`;
   return (
     <button
-      onClick={() => nativeApp()?.openTransfers?.()}
+      onClick={() => openNativeWindow("transfers")}
       className="fixed bottom-24 md:bottom-6 right-4 md:right-6 z-50 flex items-center gap-2 rounded-full px-4 py-2 shadow-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-sm font-medium text-[hsl(var(--foreground))] tabular-nums"
       aria-label="Show transfers"
     >

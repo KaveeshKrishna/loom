@@ -362,10 +362,16 @@ export async function setFavorite(nodeId: string, favorite: boolean): Promise<bo
  * own download manager handles it — no size limits, no memory use). Inside
  * a Loom app, the app's download manager takes over.
  */
-export function downloadItems(nodes: Pick<LNode, "relativePath" | "type" | "name">[]) {
+export function downloadItems(nodes: Pick<LNode, "relativePath" | "type" | "name">[], opts: { zip?: boolean } = {}) {
   if (nodes.length === 0) return;
-  // Inside a Loom app: its download manager (resumable, folders file by file).
-  if (nativeDownload(nodes.map((n) => ({ path: n.relativePath, name: n.name, type: n.type })))) return;
+  // Inside a Loom app: its download manager (resumable, folders file by file),
+  // unless a ZIP was asked for (the app saves the browser download itself).
+  if (!opts.zip && nativeDownload(nodes.map((n) => ({ path: n.relativePath, name: n.name, type: n.type })), () => browserDownload(nodes))) return;
+  browserDownload(nodes);
+}
+
+/** The browser's own download: the file itself, or one ZIP. */
+function browserDownload(nodes: Pick<LNode, "relativePath" | "type" | "name">[]) {
   if (process.env.NEXT_PUBLIC_DEMO_MODE === "1" && !(nodes.length === 1 && nodes[0].type === "FILE")) {
     toast.info("ZIP downloads need a real Loom server — they aren't available in the demo.");
     return;
@@ -374,6 +380,7 @@ export function downloadItems(nodes: Pick<LNode, "relativePath" | "type" | "name
     const a = document.createElement("a");
     a.href = `/api/files/serve?path=${encodeURIComponent(nodes[0].relativePath)}&download=1`;
     a.download = nodes[0].name;
+    a.dataset.loomBrowser = ""; // not intercepted by the app (see useNativeBridge)
     document.body.appendChild(a);
     a.click();
     a.remove();

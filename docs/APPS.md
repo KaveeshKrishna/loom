@@ -15,23 +15,24 @@ The apps need Loom 2.2 or later on the server.
 
 1. Download `Loom_…_x64-setup.exe` and run it. It installs for your Windows user only, without asking for administrator rights. The app isn't code-signed, so Windows may warn about an unknown publisher the first time: choose **More info**, then **Run anyway**.
 2. Enter your Loom's address, e.g. `https://loom.example.com`, and a name for this PC.
-3. Loom opens in a window. Sign in if it asks, check that it shows the same six-digit code as the app, and choose **Allow**.
+3. Loom opens in a window, with the app's sign-in window kept in front of it. Sign in if it asks, check that the page shows the same six-digit code as the sign-in window, and choose **Allow**.
 
 That's it. The PC now appears in Loom under **Devices**, where you can rename it or remove it. Removing it signs the app out immediately.
 
 ### What it does
 
-- **Loom in a window.** Everything works as in the browser. Uploads you start there (the Upload buttons, or dropping files and folders on the window) go to the app's transfer manager.
+- **Loom in a window.** Everything works as in the browser. Uploads you start there (**New › Upload files** or **Upload folder**, right-click › Upload, or dropping files and folders on the window) go to the app's transfer manager, and a message at the bottom of the window confirms it.
+- **This PC** in Loom's sidebar opens the app's **Transfers** (with a count of what's in progress) and **App settings**. They open in front of Loom and stay with its window. The same entries are in the menu under your name, and in the tray icon's menu.
 - **Transfers that don't stop.** Close the window, and Loom keeps running in the notification area (bottom right of the taskbar). Shut down or restart the PC, and unfinished transfers continue from where they were the next time Loom starts. Network trouble never fails a transfer: it waits and tries again by itself.
 - **The Transfers window** (tray icon › Transfers, or the progress pill in Loom) lists every upload and download with its speed and time left. You can pause, resume, cancel or retry each one, or everything at once.
 - **Upload from File Explorer.** Right-click files or folders and choose **Upload to Loom** (on Windows 11, under **Show more options**), or **Send to › Loom**. Pick the folder in Loom, and what to do if a file with the same name is already there.
 - **Name conflicts** work like in Windows: Replace (the old file goes to Loom's Trash for 15 days), Skip, or Keep both (the new one gets a number), for one file or all of them.
 - **Fast at home.** If your server offers LAN access (below), the app sends files straight to it over your home network instead of out to the internet and back. The Transfers window shows **Direct** when it does.
-- **Downloads** go to `Downloads\Loom` (or wherever you choose in Settings), folder structure included, and also resume after interruptions.
+- **Downloads** go to `Downloads\Loom` (or wherever you choose in Settings), folder structure included, and also resume after interruptions. For folders and several items, right-click › **Download as ZIP** makes one ZIP file instead, saved to the same folder (a ZIP can't resume if it's interrupted).
 
 ### Settings
 
-Settings are in the Transfers window: how many files and parts of files move at once, a speed limit, keeping the PC awake while transferring, using the home network, where downloads go, starting Loom when you sign in to Windows, and the File Explorer options. **Settings › Logs** opens the app's log folder if something goes wrong.
+Settings are in the Transfers window: how many files and parts of files move at once, a speed limit, keeping the PC awake while transferring, using the home network, where downloads go, starting Loom when you sign in to Windows, and the File Explorer options. **Settings › Logs** opens the app's log folder (`%LOCALAPPDATA%\app.loom.desktop\logs`) if something goes wrong.
 
 ### Removing it
 

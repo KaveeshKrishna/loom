@@ -109,7 +109,7 @@ Two Cloudflare limits matter, and Loom is built to fit both:
 - **100 MB request bodies.** Uploads go in 32 MB chunks (maximum 95 MB), so any file size works.
 - **100-second request timeout.** Copies run as background jobs and return immediately, so big copies don't hit it.
 
-**Pass on the visitor's real address.** Behind the tunnel, every request reaches your local proxy from `127.0.0.1`, so Loom sees every visitor as the same address. Rate limits on sign-in, pairing and share-link passwords then apply to everyone at once instead of per visitor, and Devices shows `127.0.0.1` as each app's address. Tell Caddy to trust the tunnel's `Cf-Connecting-Ip` header, in the global options at the top of the Caddyfile:
+**Pass on the visitor's real address.** Behind the tunnel, every request reaches your local proxy from `127.0.0.1`, so Loom sees every visitor as the same address. Rate limits on sign-in, pairing and share-link passwords then apply to everyone at once instead of per visitor, and Devices shows `127.0.0.1` as each app's address. Tell Caddy to trust the tunnel's `Cf-Connecting-Ip` header. On Caddy 2.7 or later (`caddy version`), in the global options at the top of the Caddyfile:
 
 ```caddyfile
 {
@@ -120,7 +120,17 @@ Two Cloudflare limits matter, and Loom is built to fit both:
 }
 ```
 
-Only do this when nothing but `cloudflared` can reach that Caddy site (it listens on `127.0.0.1` or a firewalled port); otherwise anyone could claim any address.
+Older Caddy (for example 2.6 from Ubuntu's or Debian's packages) rejects those options. Pass the header on in Loom's site block instead:
+
+```caddyfile
+loom.example.com {
+    reverse_proxy 127.0.0.1:8085 {
+        header_up X-Forwarded-For {http.request.header.Cf-Connecting-Ip}
+    }
+}
+```
+
+Check with `sudo caddy validate --config /etc/caddy/Caddyfile`, then `sudo systemctl reload caddy`. Only do this when nothing but `cloudflared` can reach that Caddy site (it listens on `127.0.0.1` or a firewalled port); otherwise anyone could claim any address.
 
 **Uploads from home** cross your internet connection twice (out to Cloudflare and back down the tunnel). The [apps](APPS.md) can go straight to the server instead: see [LAN access](APPS.md#lan-access-server-side).
 

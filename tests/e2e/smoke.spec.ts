@@ -58,6 +58,8 @@ test("long-press opens the item menu on touch screens", async ({ page, browserNa
   await page.goto("/files/Documents");
   await settle(page);
   const tile = page.locator(`[aria-label="Notes.txt"]`).first();
+  // Mid-screen, clear of the phone's bottom bar (earlier runs may have added files above it).
+  await tile.evaluate((el) => el.scrollIntoView({ block: "center" }));
   const box = (await tile.boundingBox())!;
   const x = box.x + box.width / 2;
   const y = box.y + box.height / 2;

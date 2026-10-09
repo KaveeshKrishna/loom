@@ -7,27 +7,40 @@ import { test, expect, type Page } from "@playwright/test";
 
 type Call = [string, ...unknown[]];
 
-async function withBridge(page: Page, capabilities: string[]) {
-  await page.addInitScript((caps) => {
-    const calls: unknown[] = [];
-    (window as any).__calls = calls;
-    const rec = (name: string) => (...args: unknown[]) => {
-      calls.push([name, ...args.map((a) => (Array.isArray(a) && a[0] instanceof File ? a.map((f: File) => `file:${f.name}:${f.size}`) : a))]);
-    };
-    (window as any).LoomApp = {
-      apiVersion: 1,
-      platform: "windows",
-      appVersion: "1.0.0-test",
-      capabilities: caps,
-      uploadFiles: rec("uploadFiles"),
-      pickUpload: rec("pickUpload"),
-      download: rec("download"),
-      openTransfers: rec("openTransfers"),
-      setLocation: rec("setLocation"),
-      signedOut: rec("signedOut"),
-      ready: rec("ready"),
-    };
-  }, capabilities);
+/**
+ * A fake app. `answer`: how a version 2 app answers requests ("ok", or
+ * "never" for an app that doesn't respond); version 1 apps return nothing.
+ */
+async function withBridge(page: Page, capabilities: string[], opts: { version?: 1 | 2; answer?: "ok" | "never" } = {}) {
+  await page.addInitScript(
+    ({ caps, version, answer }) => {
+      const calls: unknown[] = [];
+      (window as any).__calls = calls;
+      const rec =
+        (name: string, request = false) =>
+        (...args: unknown[]) => {
+          calls.push([name, ...args.map((a) => (Array.isArray(a) && a[0] instanceof File ? a.map((f: File) => `file:${f.name}:${f.size}`) : a))]);
+          if (version === 1 || !request) return undefined;
+          return answer === "never" ? new Promise(() => {}) : Promise.resolve(null);
+        };
+      (window as any).LoomApp = {
+        apiVersion: version,
+        platform: "windows",
+        appVersion: "1.0.0-test",
+        capabilities: caps,
+        uploadFiles: rec("uploadFiles", true),
+        pickUpload: rec("pickUpload", true),
+        download: rec("download", true),
+        openTransfers: rec("openTransfers", true),
+        openSettings: rec("openSettings", true),
+        setLocation: rec("setLocation"),
+        signedOut: rec("signedOut"),
+        ready: rec("ready"),
+        log: rec("log"),
+      };
+    },
+    { caps: capabilities, version: opts.version ?? 2, answer: opts.answer ?? "ok" }
+  );
 }
 
 const calls = (page: Page) => page.evaluate(() => (window as any).__calls as Call[]);
@@ -125,7 +138,7 @@ test("the app's transfer progress shows as a pill that opens its Transfers windo
   expect(await callsOf(page, "openTransfers")).toHaveLength(1);
   // The user menu gets a Transfers entry too.
   await page.locator("#topbar-user-menu").click();
-  await expect(page.getByRole("button", { name: "Transfers", exact: true })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("button", { name: "Transfers", exact: true })).toBeVisible();
 });
 
 test("the app can open a folder", async ({ page }) => {
@@ -143,4 +156,106 @@ test("without the bridge, uploads happen in the page as before", async ({ page }
     { name: `browser-${Date.now()}.txt`, mimeType: "text/plain", buffer: Buffer.from("from the browser") },
   ]);
   await expect(page.getByText(/upload(s)? complete|1 uploaded/i)).toBeVisible({ timeout: 15_000 });
+});
+
+test("a version 1 app (no answers) still gets the picker request", async ({ page }) => {
+  await withBridge(page, ["uploads.picker"], { version: 1 });
+  let chooser = false;
+  page.on("filechooser", () => (chooser = true));
+  await page.goto("/files/Documents");
+  await expect(page.getByText("Notes.txt")).toBeVisible();
+  await page.getByRole("button", { name: "New" }).click();
+  await page.getByRole("menuitem", { name: "Upload files" }).click();
+  await page.waitForTimeout(3500);
+  expect(await callsOf(page, "pickUpload")).toEqual([["pickUpload", "Documents", "files"]]);
+  expect(chooser).toBe(false);
+});
+
+test("when the app doesn't answer, the page uses its own picker and ZIP download", async ({ page }) => {
+  await withBridge(page, ["uploads.picker", "downloads", "transfers"], { answer: "never" });
+  await page.goto("/files/Documents");
+  await expect(page.getByText("Notes.txt")).toBeVisible();
+  // Right-click on empty space → Upload files: the app is asked, then the page's chooser opens.
+  const chooser = page.waitForEvent("filechooser", { timeout: 6000 });
+  await page.getByRole("button", { name: "New" }).click();
+  await page.getByRole("menuitem", { name: "Upload files" }).click();
+  await chooser;
+  expect(await callsOf(page, "pickUpload")).toHaveLength(1);
+  expect((await callsOf(page, "log")).map((c) => c[2])).toContainEqual(expect.stringContaining("pickUpload: no answer"));
+  // Download (the app's download manager) falls back to the browser's download.
+  const download = page.waitForEvent("download", { timeout: 6000 });
+  await page.locator('[aria-label="Packing list.md"]').first().click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Download", exact: true }).click();
+  expect((await download).suggestedFilename()).toBe("Packing list.md");
+  await expect(page.getByText(/didn't answer, so your browser is downloading it/)).toHaveCount(1);
+  // …once: the browser's own download isn't sent to the app again.
+  await page.waitForTimeout(3000);
+  await expect(page.getByText(/didn't answer, so your browser is downloading it/)).toHaveCount(1);
+  expect(await callsOf(page, "download")).toHaveLength(1);
+  // Transfers can't fall back: say so instead of doing nothing.
+  await page.locator("#topbar-user-menu").click();
+  await page.getByRole("banner").getByRole("button", { name: "Transfers", exact: true }).click();
+  await expect(page.getByText(/didn't respond/)).toBeVisible({ timeout: 6000 });
+});
+
+test("folders: Download goes to the app, Download as ZIP to the browser", async ({ page }) => {
+  await withBridge(page, ["downloads", "transfers"]);
+  await page.goto("/files");
+  const folder = page.locator('[aria-label="Documents"]').first();
+  await expect(folder).toBeVisible();
+  await folder.click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Download as ZIP" })).toBeVisible();
+  await page.screenshot({ path: "e2e-results/screens/desktop/bridge-folder-menu.png" });
+  await page.getByRole("menuitem", { name: "Download", exact: true }).click();
+  expect(await callsOf(page, "download")).toEqual([["download", { items: [{ path: "Documents", name: "Documents", type: "DIRECTORY" }] }]]);
+  const zip = page.waitForRequest((r) => r.url().endsWith("/api/download/zip") && r.method() === "POST");
+  await folder.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Download as ZIP" }).click();
+  expect((await zip).postData()).toContain("path=Documents");
+  expect(await callsOf(page, "download")).toHaveLength(1);
+});
+
+test("the sidebar has the app's Transfers (with a count) and settings", async ({ page }) => {
+  await withBridge(page, ["transfers", "settings"]);
+  await page.goto("/files");
+  await ready(page);
+  const nav = page.getByRole("navigation", { name: "Main" });
+  await expect(nav.getByText("This PC")).toBeVisible();
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new CustomEvent("loomapp:transfers", {
+        detail: { active: 2, queued: 3, paused: 0, failed: 0, bytesDone: 1, bytesTotal: 10, bytesPerSecond: 0, via: null },
+      })
+    )
+  );
+  await expect(nav.getByRole("button", { name: /Transfers/ })).toContainText("5");
+  await page.screenshot({ path: "e2e-results/screens/desktop/bridge-sidebar.png" });
+  await nav.getByRole("button", { name: /Transfers/ }).click();
+  await nav.getByRole("button", { name: "App settings" }).click();
+  expect((await calls(page)).filter((c) => c[0] === "openTransfers" || c[0] === "openSettings").map((c) => c[0])).toEqual(["openTransfers", "openSettings"]);
+  // The user menu has both too.
+  await page.locator("#topbar-user-menu").click();
+  await expect(page.getByRole("button", { name: "App settings" })).toHaveCount(2);
+});
+
+test("the app's messages show as toasts, with a way to its Transfers", async ({ page }) => {
+  await withBridge(page, ["transfers"]);
+  await page.goto("/files");
+  await ready(page);
+  await page.evaluate(() =>
+    window.dispatchEvent(new CustomEvent("loomapp:toast", { detail: { kind: "info", message: "Uploading 3 items to Photos", action: "transfers" } }))
+  );
+  await expect(page.getByText("Uploading 3 items to Photos")).toBeVisible();
+  await page.getByRole("button", { name: "Open Transfers" }).click();
+  expect(await callsOf(page, "openTransfers")).toHaveLength(1);
+});
+
+test("without the app there's no This PC section and folder menus offer the ZIP as before", async ({ page }) => {
+  await page.goto("/files");
+  const folder = page.locator('[aria-label="Documents"]').first();
+  await expect(folder).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Main" }).getByText("This PC")).toHaveCount(0);
+  await folder.click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "Download as ZIP" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Download", exact: true })).toHaveCount(0);
 });

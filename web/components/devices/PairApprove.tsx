@@ -19,6 +19,11 @@ interface Request {
   expiresAt: string;
 }
 
+const CHECK_HINT: Record<string, string> = {
+  windows: "Check that the Loom sign-in window on your PC shows the same code",
+  android: "Check that the Loom app on your phone or tablet shows the same code",
+};
+
 const PLATFORM_LABEL: Record<string, string> = { windows: "Windows", macos: "macOS", linux: "Linux", android: "Android", ios: "iOS" };
 
 export function PairApprove({ request, userName }: { request: Request | null; userName: string }) {
@@ -71,7 +76,7 @@ export function PairApprove({ request, userName }: { request: Request | null; us
               </div>
 
               <div className="rounded-xl bg-[hsl(var(--muted))] px-4 py-3 text-center">
-                <p className="text-xs text-[hsl(var(--muted-foreground))]">Check that the app shows the same code</p>
+                <p className="text-xs text-[hsl(var(--muted-foreground))]">{CHECK_HINT[request.platform] ?? "Check that the Loom app shows the same code"}</p>
                 <p className="text-2xl font-semibold tracking-[0.2em] tabular-nums mt-1">{request.checkCode}</p>
               </div>
 

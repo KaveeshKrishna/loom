@@ -2,6 +2,16 @@
 
 What changed in each version of Loom, newest first. Update with `./scripts/update.sh`, see [docs/UPGRADING.md](docs/UPGRADING.md).
 
+## 2.2.1
+
+Fixes from the first round of testing Loom for Windows.
+
+- **Inside Loom for Windows**, Upload files / Upload folder (from the New button or a right-click), Download, Download as ZIP and Transfers in the user menu did nothing: the app never received the page's requests. They work now. The app confirms every request, and when it doesn't answer, the page uses its own file picker or the browser's download instead of doing nothing.
+- **This PC** in the sidebar (inside the app) opens the app's Transfers, with a count of what's in progress, and its settings.
+- Inside the app, folders and multiple items offer both **Download** (through the app, resumable, folders stay folders) and **Download as ZIP**.
+- The approval page says where to compare the code: the Loom sign-in window on your PC.
+- [Reverse proxy](docs/REVERSE-PROXY.md#cloudflare-tunnel): passing the visitor's real address on with Caddy older than 2.7.
+
 ## 2.2.0
 
 The Loom apps: Loom for Windows, with uploads and downloads that keep going in the background and survive restarts. Plus fixes for iPhones and tablets.

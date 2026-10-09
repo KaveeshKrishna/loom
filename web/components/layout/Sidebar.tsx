@@ -1,15 +1,16 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Star, FolderOpen, Image, Video, FileText, Settings, ChevronRight, X, Trash2, ShieldAlert, Clock, Music, PinOff, MoreVertical, Folder, Link2, MonitorSmartphone } from "lucide-react";
+import { Star, FolderOpen, Image, Video, FileText, Settings, ChevronRight, X, Trash2, ShieldAlert, Clock, Music, PinOff, MoreVertical, Folder, Link2, MonitorSmartphone, ArrowDownUp, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNav } from "./TopBarContext";
 import { Menu } from "@/components/files/Menu";
 import { LOOM_DRAG_TYPE } from "@/lib/client/drop";
 import { moveItems, copyItems, trashItems } from "@/components/files/actions";
 import { StorageMeter } from "./StorageMeter";
+import { hasNative, nativeApp, openNativeWindow, useNativeTransfers } from "@/lib/client/native";
 
 const navItems = [
   { href: "/files", label: "All Files", icon: FolderOpen },
@@ -97,6 +98,80 @@ function NavLink({
         </>
       )}
     </Link>
+  );
+}
+
+/** A sidebar entry that opens one of the app's own windows. */
+function AppButton({
+  label,
+  icon: Icon,
+  collapsed,
+  onClick,
+  badge,
+  tone,
+}: {
+  label: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  collapsed?: boolean;
+  onClick: () => void;
+  badge?: number;
+  tone?: "warning";
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={collapsed ? label : undefined}
+      className={cn(
+        "relative flex w-full items-center rounded-md text-sm transition-all duration-150 active:scale-[0.98] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--sidebar-item-hover))] hover:text-[hsl(var(--foreground))]",
+        collapsed ? "justify-center py-3 px-0" : "gap-2.5 px-3 py-2"
+      )}
+    >
+      <Icon size={collapsed ? 18 : 16} className="shrink-0" />
+      {!collapsed && <span className="truncate">{label}</span>}
+      {!!badge && (
+        <span
+          className={cn(
+            "min-w-[1.25rem] h-5 px-1.5 rounded-full text-[11px] font-semibold tabular-nums flex items-center justify-center",
+            tone === "warning" ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : "bg-[hsl(var(--primary)/0.12)] text-[hsl(var(--primary))]",
+            collapsed ? "absolute top-1 right-1.5 h-4 min-w-[1rem] px-1 text-[10px]" : "ml-auto"
+          )}
+        >
+          {badge > 999 ? "999+" : badge}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/** "This PC" / "This device": the Loom app's Transfers and settings, when Loom runs inside the app. */
+function AppSection({ collapsed, onClose }: { collapsed?: boolean; onClose?: () => void }) {
+  // After mount: the server render never has the app.
+  const [app, setApp] = useState<{ title: string; settings: boolean } | null>(null);
+  useEffect(() => {
+    if (hasNative("transfers")) setApp({ title: nativeApp()?.platform === "windows" ? "This PC" : "This device", settings: hasNative("settings") });
+  }, []);
+  const t = useNativeTransfers();
+  if (!app) return null;
+  const busy = t ? t.active + t.queued : 0;
+  const attention = t?.failed ?? 0;
+  const open = (which: "transfers" | "settings") => {
+    onClose?.();
+    openNativeWindow(which);
+  };
+  return (
+    <>
+      <div className="my-2 mx-3 border-t border-[hsl(var(--sidebar-border))]" />
+      {!collapsed && <p className="px-3 pb-1 text-[11px] uppercase tracking-wide text-[hsl(var(--muted-foreground))]">{app.title}</p>}
+      <AppButton
+        label="Transfers"
+        icon={ArrowDownUp}
+        collapsed={collapsed}
+        onClick={() => open("transfers")}
+        badge={attention || busy}
+        tone={attention ? "warning" : undefined}
+      />
+      {app.settings && <AppButton label="App settings" icon={SlidersHorizontal} collapsed={collapsed} onClick={() => open("settings")} />}
+    </>
   );
 }
 
@@ -193,6 +268,8 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, colla
             })}
           </>
         )}
+
+        <AppSection collapsed={collapsed} onClose={onClose} />
 
         <div className="my-2 mx-3 border-t border-[hsl(var(--sidebar-border))]" />
         <NavLink href="/devices" label="Devices" icon={MonitorSmartphone} collapsed={collapsed} onClick={onClose} active={pathname === "/devices"} />
