@@ -17,7 +17,7 @@
   },
   "devDependencies": {
     "@types/mime-types": "2.1.4",
-    "@types/node": "22.15.30",
+    "@types/node": "26.6.4",
     "@types/pg": "8.23.1",
     "prisma": "^6.11.1",
     "tsx": "4.20.3",
