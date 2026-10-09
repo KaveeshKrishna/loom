@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, Eye, EyeOff } from "lucide-react";
 import { signIn } from "@/lib/auth-client";
 
-export function LoginForm() {
+export function LoginForm({ next = "/files" }: { next?: string }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -22,7 +22,7 @@ export function LoginForm() {
       if (res.error) {
         setError("Invalid email or password.");
       } else {
-        router.push("/files");
+        router.push(next);
       }
     } catch {
       setError("Something went wrong. Please try again.");

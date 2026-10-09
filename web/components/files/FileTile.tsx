@@ -225,7 +225,7 @@ export const FileTile = memo(function FileTile({ node, selected, focused, favori
           const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
           h.onMenu(node, r.right, r.bottom);
         }}
-        className="absolute top-2 right-2 p-1.5 rounded-md shadow-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] bg-[hsl(var(--background)/0.85)] opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"
+        className="absolute top-2 right-2 p-1.5 rounded-md shadow-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] bg-[hsl(var(--background)/0.85)] opacity-100 lg:can-hover:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"
       >
         <MoreVertical size={16} />
       </button>
@@ -315,7 +315,7 @@ export const FileRow = memo(function FileRow({ node, selected, focused, favorite
           const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
           h.onMenu(node, r.right, r.bottom);
         }}
-        className="w-7 shrink-0 flex items-center justify-center p-1 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"
+        className="w-7 shrink-0 flex items-center justify-center p-1 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] lg:can-hover:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"
       >
         {node.type === "DIRECTORY" ? <ChevronRight size={16} className="lg:hidden" /> : null}
         <MoreVertical size={16} className={node.type === "DIRECTORY" ? "hidden lg:block" : ""} />

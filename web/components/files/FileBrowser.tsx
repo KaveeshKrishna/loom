@@ -29,6 +29,7 @@ import { cn, formatBytes, sortNodes, matchesTypeFilter } from "@/lib/utils";
 import { filesHref, parentOf } from "@/lib/client/api";
 import type { LNode } from "@/lib/client/types";
 import { collectDroppedFiles, LOOM_DRAG_TYPE } from "@/lib/client/drop";
+import { nativePickUpload, useNativeLocation } from "@/lib/client/native";
 import { useFavoriteIds, useFolderSizes, setFavoriteLocal } from "@/lib/client/hooks";
 import { useViewPrefs, useNav, type SortKey, type TypeFilter } from "@/components/layout/TopBarContext";
 import { useClipboard } from "@/components/layout/ClipboardContext";
@@ -156,6 +157,14 @@ export function FileBrowser({
   const [sortMenu, setSortMenu] = useState<{ x: number; y: number } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
+  // Inside a Loom app, its own picker replaces the page's file inputs.
+  const chooseUploadFiles = useCallback(() => {
+    if (!nativePickUpload(folderPath ?? "", "files")) fileInput.current?.click();
+  }, [folderPath]);
+  const chooseUploadFolder = useCallback(() => {
+    if (!nativePickUpload(folderPath ?? "", "folder")) folderInput.current?.click();
+  }, [folderPath]);
+  useNativeLocation(folderPath, folderPath != null && canWrite);
 
   const open = useCallback(
     (node: LNode) => {
@@ -223,8 +232,8 @@ export function FileBrowser({
         // Empty-space menu (folder views only)
         if (!isFolder) return [];
         return [
-          { label: "Upload files", icon: <UploadCloud size={15} />, onClick: () => fileInput.current?.click(), disabled: !canWrite },
-          { label: "Upload folder", icon: <FolderUp size={15} />, onClick: () => folderInput.current?.click(), disabled: !canWrite },
+          { label: "Upload files", icon: <UploadCloud size={15} />, onClick: chooseUploadFiles, disabled: !canWrite },
+          { label: "Upload folder", icon: <FolderUp size={15} />, onClick: chooseUploadFolder, disabled: !canWrite },
           { label: "New folder", icon: <FolderPlus size={15} />, onClick: () => createFolder(folderPath!), disabled: !canWrite, separatorBefore: true },
           { label: "New text file", icon: <FilePlus size={15} />, onClick: () => createTextFile(folderPath!).then((p) => p && router.push(`${filesHref(folderPath!)}?edit=${encodeURIComponent(p)}`)), disabled: !canWrite },
           ...(clipboard.action
@@ -274,7 +283,7 @@ export function FileBrowser({
       items.push({ label: "Move to Trash", icon: <Trash2 size={15} />, danger: true, onClick: () => trashItems(targets, { confirm: true }), shortcut: "Del", separatorBefore: true });
       return items;
     },
-    [isFolder, canWrite, folderPath, clipboard, paste, display, targetsFor, favoriteIds, pins, open, showPath, router, doMoveTo, cutToClipboard, copyToClipboard, toggleFav, togglePin, showDetailsFor]
+    [isFolder, canWrite, folderPath, clipboard, paste, display, targetsFor, favoriteIds, pins, open, showPath, router, doMoveTo, cutToClipboard, copyToClipboard, toggleFav, togglePin, showDetailsFor, chooseUploadFiles, chooseUploadFolder]
   );
 
   // ── drag & drop ──
@@ -563,7 +572,7 @@ export function FileBrowser({
               <>
                 <p className="text-sm mt-1">Drop files here, or</p>
                 <div className="flex gap-2 mt-3">
-                  <button onClick={() => fileInput.current?.click()} className="px-3 py-1.5 rounded-lg bg-[hsl(var(--primary))] text-white text-sm">
+                  <button onClick={chooseUploadFiles} className="px-3 py-1.5 rounded-lg bg-[hsl(var(--primary))] text-white text-sm">
                     Upload files
                   </button>
                   <button onClick={() => createFolder(folderPath!)} className="px-3 py-1.5 rounded-lg border text-sm hover:bg-[hsl(var(--accent))]">
@@ -784,8 +793,8 @@ export function FileBrowser({
           y={newMenu.y}
           onClose={() => setNewMenu(null)}
           items={[
-            { label: "Upload files", icon: <UploadCloud size={15} />, onClick: () => fileInput.current?.click() },
-            { label: "Upload folder", icon: <FolderUp size={15} />, onClick: () => folderInput.current?.click() },
+            { label: "Upload files", icon: <UploadCloud size={15} />, onClick: chooseUploadFiles },
+            { label: "Upload folder", icon: <FolderUp size={15} />, onClick: chooseUploadFolder },
             { label: "New folder", icon: <FolderPlus size={15} />, onClick: () => createFolder(folderPath!), separatorBefore: true },
             { label: "New text file", icon: <FilePlus size={15} />, onClick: () => createTextFile(folderPath!).then((p) => p && router.push(`${filesHref(folderPath!)}?edit=${encodeURIComponent(p)}`)) },
           ]}

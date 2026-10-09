@@ -3,6 +3,24 @@
 /* The in-app theme toggle sets .dark on <html>; make Tailwind's dark: variant follow it. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Controls revealed on hover are only hidden on devices with a mouse:
+   "can-hover:opacity-0 group-hover:opacity-100". On touch screens (phones,
+   tablets) they stay visible, since nothing can hover there. */
+@custom-variant can-hover (@media (hover: hover) and (pointer: fine));
+
+/* iOS Safari zooms the page when a field with text under 16px gets focus;
+   on touch screens generally, 16px fields are also easier to read and hit. */
+@media (pointer: coarse) {
+  input, select, textarea {
+    font-size: max(16px, 1em);
+  }
+}
+@supports (-webkit-touch-callout: none) {
+  input, select, textarea {
+    font-size: max(16px, 1em);
+  }
+}
+
 @layer base {
   :root {
     --background: 0 0% 98%;

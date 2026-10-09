@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Star, FolderOpen, Image, Video, FileText, Settings, ChevronRight, X, Trash2, ShieldAlert, Clock, Music, PinOff, MoreVertical, Folder, Link2 } from "lucide-react";
+import { Star, FolderOpen, Image, Video, FileText, Settings, ChevronRight, X, Trash2, ShieldAlert, Clock, Music, PinOff, MoreVertical, Folder, Link2, MonitorSmartphone } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNav } from "./TopBarContext";
 import { Menu } from "@/components/files/Menu";
@@ -182,7 +182,7 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, colla
                         const r = e.currentTarget.getBoundingClientRect();
                         setPinMenu({ x: r.right, y: r.bottom, pin });
                       }}
-                      className="absolute right-1 p-1 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] lg:opacity-0 lg:group-hover:opacity-100"
+                      className="absolute right-1 p-1 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--accent))] lg:can-hover:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"
                       aria-label={`${pin.name} options`}
                     >
                       <MoreVertical size={15} />
@@ -195,6 +195,7 @@ export function Sidebar({ isOwner, userName, userEmail, onClose, isMobile, colla
         )}
 
         <div className="my-2 mx-3 border-t border-[hsl(var(--sidebar-border))]" />
+        <NavLink href="/devices" label="Devices" icon={MonitorSmartphone} collapsed={collapsed} onClick={onClose} active={pathname === "/devices"} />
         {isOwner && (
           <NavLink href="/health" label="File Health" icon={ShieldAlert} collapsed={collapsed} onClick={onClose} active={pathname === "/health"} />
         )}

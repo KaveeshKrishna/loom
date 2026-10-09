@@ -12,6 +12,7 @@ import type { LNode } from "@/lib/client/types";
 import { toast } from "@/components/ui/Toaster";
 import { dialogs, validateFileName } from "@/components/ui/Dialog";
 import { askCollision, resolveConflicts, type CollisionAction, type ConflictInfo, type Resolution } from "./CollisionDialog";
+import { nativeDownload } from "@/lib/client/native";
 
 interface OpResult {
   path: string;
@@ -358,10 +359,13 @@ export async function setFavorite(nodeId: string, favorite: boolean): Promise<bo
 /**
  * Download files/folders. A single file downloads directly; anything else
  * is streamed as one ZIP by the server (a hidden form POST, so the browser's
- * own download manager handles it — no size limits, no memory use).
+ * own download manager handles it — no size limits, no memory use). Inside
+ * a Loom app, the app's download manager takes over.
  */
 export function downloadItems(nodes: Pick<LNode, "relativePath" | "type" | "name">[]) {
   if (nodes.length === 0) return;
+  // Inside a Loom app: its download manager (resumable, folders file by file).
+  if (nativeDownload(nodes.map((n) => ({ path: n.relativePath, name: n.name, type: n.type })))) return;
   if (process.env.NEXT_PUBLIC_DEMO_MODE === "1" && !(nodes.length === 1 && nodes[0].type === "FILE")) {
     toast.info("ZIP downloads need a real Loom server — they aren't available in the demo.");
     return;

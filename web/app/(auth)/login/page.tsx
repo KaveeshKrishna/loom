@@ -6,11 +6,16 @@ import { LoginForm } from "./LoginForm";
 // must not be statically prerendered at build time, when no DB is reachable.
 export const dynamic = "force-dynamic";
 
-export default async function LoginPage() {
+/** Where to go after signing in: a path on this site only (no //host, no \\). */
+function safeNext(v: string | string[] | undefined): string {
+  return typeof v === "string" && /^\/(?![/\\])[\x21-\x7e]*$/.test(v) ? v : "/files";
+}
+
+export default async function LoginPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   // A brand new install has no users yet — send the visitor to first-run
   // setup instead of a login form for an account that doesn't exist.
   const userCount = await prisma.user.count();
   if (userCount === 0) redirect("/setup");
 
-  return <LoginForm />;
+  return <LoginForm next={safeNext((await searchParams).next)} />;
 }

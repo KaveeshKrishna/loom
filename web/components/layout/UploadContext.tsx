@@ -18,6 +18,10 @@
  *
  * State and actions live in separate contexts so pages that only need
  * enqueueFiles() don't re-render on every progress tick.
+ *
+ * Inside a Loom app (lib/client/native.ts) the files go to the app's own
+ * transfer manager after the conflict dialog, instead of being sent from
+ * this page.
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -25,6 +29,7 @@ import { emitDirChange, useChangeReason } from "@/lib/client/live";
 import { parentOf } from "@/lib/client/api";
 import { resolveConflicts, type ConflictInfo } from "@/components/files/CollisionDialog";
 import { toast } from "@/components/ui/Toaster";
+import { hasNative, nativeUploadFiles } from "@/lib/client/native";
 
 export type UploadStatus = "pending" | "uploading" | "finalizing" | "done" | "error" | "cancelled";
 
@@ -398,7 +403,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   // After a crash or a closed tab, show what's unfinished so it can be resumed or discarded.
   useEffect(() => {
     refreshUnfinished().then((list) => {
-      if (list.length) setVisible(true);
+      // On phones the panel would cover half the screen on every page load;
+      // the widget shows a small pill instead.
+      if (list.length && window.matchMedia("(min-width: 640px)").matches) setVisible(true);
     });
   }, [refreshUnfinished]);
 
@@ -452,8 +459,19 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         const skipped = list.length - chosen.length;
         if (skipped) toast.info(`Skipped ${skipped} file${skipped === 1 ? "" : "s"} that already exist${skipped === 1 ? "s" : ""}.`);
         if (chosen.length === 0) return;
-        const added: UploadEntry[] = chosen.map((f) => {
+        const conflictOf = (f: { relativePath: string }) => {
           const d = decisions[f.relativePath];
+          return d === "replace" || d === "keep_both" ? d : fallback;
+        };
+        if (hasNative("uploads.files")) {
+          nativeUploadFiles(
+            destDir,
+            chosen.map((f) => ({ relativePath: f.relativePath, size: f.file.size, lastModified: f.file.lastModified, conflict: conflictOf(f) })),
+            chosen.map((f) => f.file)
+          );
+          return;
+        }
+        const added: UploadEntry[] = chosen.map((f) => {
           return {
             id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2),
             file: f.file,
@@ -463,7 +481,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
             progress: 0,
             bytesSent: 0,
             speed: 0,
-            conflict: d === "replace" || d === "keep_both" ? d : fallback,
+            conflict: conflictOf(f),
           };
         });
         for (const e of added) entries.current.set(e.id, e);
@@ -532,6 +550,16 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
+  }, [busy]);
+
+  // Hold a Web Lock while uploading: Chrome doesn't freeze a background tab
+  // that holds one (Energy Saver), so uploads keep going when you switch tabs.
+  useEffect(() => {
+    if (!busy || typeof navigator === "undefined" || !navigator.locks) return;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    navigator.locks.request("loom-uploads", { mode: "shared" }, () => held).catch(() => {});
+    return () => release();
   }, [busy]);
 
   const actions = useMemo<UploadActions>(

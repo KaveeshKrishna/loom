@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useLayoutEffect, useEffect, type ReactNode } from "react";
+import { useState, useLayoutEffect, useEffect, useCallback, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { TopBarProvider, useSearch, useNav } from "./TopBarContext";
@@ -17,6 +18,8 @@ import { FolderPickerHost } from "@/components/files/FolderPicker";
 import { ShareHost } from "@/components/files/ShareDialog";
 import { registerPinUpdater } from "@/components/files/actions";
 import { cn } from "@/lib/utils";
+import { useNativeBridge } from "@/lib/client/native";
+import { filesHref } from "@/lib/client/api";
 
 interface MainShellProps {
   children: ReactNode;
@@ -47,6 +50,11 @@ function MainShellInner({ children, userName, userEmail, isOwner }: MainShellPro
   useLayoutEffect(() => {
     setMounted(true);
   }, []);
+
+  // Inside a Loom app: downloads go to the app, and the app can open folders.
+  const router = useRouter();
+  const openFolder = useCallback((path: string) => router.push(filesHref(path)), [router]);
+  useNativeBridge(openFolder);
 
   const toggleDesktopSidebar = () => {
     const next = !desktopSidebarOpen;

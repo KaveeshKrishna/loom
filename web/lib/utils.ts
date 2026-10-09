@@ -23,6 +23,19 @@ export function formatDate(date: Date | string | null): string {
   }).format(new Date(date));
 }
 
+/** "just now", "5 min ago", "3 h ago", "yesterday", "4 days ago", then a date. */
+export function formatRelative(date: Date | string | null): string {
+  if (!date) return "never";
+  const t = new Date(date).getTime();
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86_400) return `${Math.floor(s / 3600)} h ago`;
+  if (s < 2 * 86_400) return "yesterday";
+  if (s < 7 * 86_400) return `${Math.floor(s / 86_400)} days ago`;
+  return formatDate(date);
+}
+
 export function getFileCategory(
   mimeType: string | null,
   filename?: string

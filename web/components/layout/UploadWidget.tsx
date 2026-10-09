@@ -8,6 +8,9 @@
  * safely stored; a small "preview processing" hint shows while thumbnails
  * are generated in the background. Failed uploads can be retried. Hiding
  * the panel leaves a small pill that brings it back.
+ *
+ * Inside a Loom app, uploads run in the app instead; a pill shows its
+ * progress and opens the app's Transfers window.
  */
 
 import { useState } from "react";
@@ -15,7 +18,8 @@ import { useRouter } from "next/navigation";
 import { useUpload, type UploadEntry } from "./UploadContext";
 import { formatBytes } from "@/lib/utils";
 import { filesHref, parentOf } from "@/lib/client/api";
-import { Upload, X, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Minimize2, RotateCcw, Sparkles } from "lucide-react";
+import { Upload, X, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Minimize2, RotateCcw, Sparkles, Pause, Wifi } from "lucide-react";
+import { nativeApp, useNativeTransfers, type NativeTransfers } from "@/lib/client/native";
 
 function formatEta(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return "";
@@ -84,13 +88,59 @@ function UnfinishedBanner() {
   );
 }
 
+/** The app's transfers, as a pill that opens its Transfers window. */
+function NativeTransfersPill({ t }: { t: NativeTransfers }) {
+  const busy = t.active + t.queued;
+  if (busy + t.paused + t.failed === 0) return null;
+  const pct = t.bytesTotal ? Math.floor((t.bytesDone / t.bytesTotal) * 100) : 0;
+  const label = busy
+    ? `${pct}% · ${busy} left${t.bytesPerSecond > 0 ? ` · ${formatBytes(t.bytesPerSecond)}/s` : ""}`
+    : t.failed
+      ? `${t.failed} need${t.failed === 1 ? "s" : ""} attention`
+      : `${t.paused} paused`;
+  return (
+    <button
+      onClick={() => nativeApp()?.openTransfers?.()}
+      className="fixed bottom-24 md:bottom-6 right-4 md:right-6 z-50 flex items-center gap-2 rounded-full px-4 py-2 shadow-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-sm font-medium text-[hsl(var(--foreground))] tabular-nums"
+      aria-label="Show transfers"
+    >
+      {busy ? (
+        <Loader2 size={15} className="animate-spin text-[hsl(var(--primary))]" />
+      ) : t.failed ? (
+        <AlertCircle size={15} className="text-red-500" />
+      ) : (
+        <Pause size={15} className="text-[hsl(var(--muted-foreground))]" />
+      )}
+      {label}
+      {busy > 0 && t.via === "lan" && (
+        <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400" title="Uploading over your home network">
+          <Wifi size={12} /> LAN
+        </span>
+      )}
+    </button>
+  );
+}
+
 export function UploadWidget() {
   const { uploads, isVisible, setVisible, cancelUpload, retryUpload, dismissUpload, clearCompleted, unfinished } = useUpload();
   const [collapsed, setCollapsed] = useState(false);
+  const native = useNativeTransfers();
 
+  if (native && uploads.length === 0) return <NativeTransfersPill t={native} />;
   if (uploads.length === 0 && unfinished.length === 0) return null;
   if (uploads.length === 0) {
-    if (!isVisible) return null;
+    if (!isVisible) {
+      return (
+        <button
+          onClick={() => setVisible(true)}
+          className="fixed bottom-24 md:bottom-6 right-4 md:right-6 z-50 flex items-center gap-2 rounded-full px-4 py-2 shadow-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-sm font-medium text-[hsl(var(--foreground))]"
+          aria-label="Show unfinished uploads"
+        >
+          <AlertCircle size={15} className="text-amber-500" />
+          {unfinished.length} unfinished upload{unfinished.length === 1 ? "" : "s"}
+        </button>
+      );
+    }
     return (
       <div
         className="fixed bottom-24 md:bottom-6 right-2 left-2 sm:left-auto sm:right-6 z-50 sm:w-96 rounded-xl shadow-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden"

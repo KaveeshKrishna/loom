@@ -130,6 +130,14 @@ function uniqueName(dir: string, name: string): string {
   return candidate;
 }
 
+// ─── devices (fabricated; the Devices page lists, renames and removes them) ──
+
+const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+const demoDevices = [
+  { id: "dev-desktop", name: "Study PC", platform: "windows", appVersion: "1.0.0", createdAt: daysAgo(40), lastSeenAt: new Date(Date.now() - 4 * 60_000).toISOString(), lastIp: "192.168.1.20", current: false, mine: true, user: { id: "demo-owner", name: "Demo Owner", email: "demo@example.com" } },
+  { id: "dev-tablet", name: "Tablet", platform: "android", appVersion: "1.0.0", createdAt: daysAgo(12), lastSeenAt: daysAgo(2), lastIp: "192.168.1.31", current: false, mine: true, user: { id: "demo-owner", name: "Demo Owner", email: "demo@example.com" } },
+];
+
 // ─── router ──────────────────────────────────────────────────────────────────
 
 interface Ctx {
@@ -688,6 +696,30 @@ function route(method: string, path: string, ctx: Ctx): unknown {
   if (p === "/settings/sharing" && M("GET")) return { enabled: false };
   if ((p === "/settings/sharing" && M("PUT")) || (p === "/shares" && M("POST"))) {
     throw fail(400, "Share links need a real Loom server — they aren't available in the demo.");
+  }
+
+  // ── devices (the Loom apps; pairing itself needs a real server) ──
+  if (p === "/devices" && M("GET")) return { devices: demoDevices };
+  if (seg[0] === "devices" && seg[1] && seg[1] !== "codes" && seg[1] !== "pair" && seg[1] !== "me" && seg[1] !== "web-login") {
+    const d = demoDevices.find((x) => x.id === seg[1]);
+    if (!d) throw fail(404, "Device not found");
+    if (M("PATCH")) {
+      d.name = String(ctx.body.name ?? d.name).trim().slice(0, 80) || d.name;
+      return { device: d };
+    }
+    if (M("DELETE")) {
+      demoDevices.splice(demoDevices.indexOf(d), 1);
+      return { success: true };
+    }
+  }
+  if (p === "/devices/codes" && M("POST")) {
+    const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const c = Array.from({ length: 12 }, () => A[Math.floor(Math.random() * A.length)]).join("");
+    return { code: `${c.slice(0, 4)}-${c.slice(4, 8)}-${c.slice(8)}`, expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() };
+  }
+  if (seg[0] === "devices") throw fail(400, "Pairing an app needs a real Loom server — it isn't available in the demo.");
+  if (p === "/client/info" && M("GET")) {
+    return { product: "loom", version: "demo", apiVersion: 1, instanceId: "demo", publicUrl: null, capabilities: [], upload: { chunkSize: DEMO_CHUNK_SIZE }, user: null, deviceId: null, lan: null };
   }
 
   // ── folder sizes / storage / text files (added with the v2 UI) ──

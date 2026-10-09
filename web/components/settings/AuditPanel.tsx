@@ -88,7 +88,7 @@ export function AuditPanel() {
                 </div>
                 <button
                   onClick={() => deleteLog(log.id)}
-                  className="shrink-0 p-1.5 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive)/0.1)] transition-colors opacity-0 group-hover:opacity-100"
+                  className="shrink-0 p-1.5 rounded-md text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive)/0.1)] transition-colors can-hover:opacity-0 group-hover:opacity-100 focus:opacity-100"
                   title="Delete this log"
                 >
                   <Trash2 size={13} />

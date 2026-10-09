@@ -3,9 +3,10 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Search, Grid3X3, List, Menu, SunMedium, Moon, Monitor, LogOut, ChevronDown, Globe, FolderSearch, X, Bell, CheckCircle2, AlertCircle } from "lucide-react";
+import { Search, Grid3X3, List, Menu, SunMedium, Moon, Monitor, LogOut, ChevronDown, Globe, FolderSearch, X, Bell, CheckCircle2, AlertCircle, MonitorSmartphone, ArrowDownUp } from "lucide-react";
 import { cn, truncateName } from "@/lib/utils";
 import { signOut } from "@/lib/auth-client";
+import { nativeApp, hasNative } from "@/lib/client/native";
 import type { Notification } from "@prisma/client";
 
 
@@ -186,6 +187,8 @@ export function TopBar({ onMenuToggle, userName }: TopBarProps) {
 
   const handleSignOut = async () => {
     await signOut();
+    // Inside a Loom app, signing out of the page signs the app out too.
+    nativeApp()?.signedOut?.();
     router.push("/login");
   };
 
@@ -411,7 +414,7 @@ export function TopBar({ onMenuToggle, userName }: TopBarProps) {
                       {!notification.read && (
                         <button
                           onClick={(e) => { e.stopPropagation(); dismissNotification(notification.id); }}
-                          className="absolute right-2 top-2 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-[hsl(var(--background))] transition-opacity"
+                          className="absolute right-2 top-2 p-1 rounded-md can-hover:opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-[hsl(var(--background))] transition-opacity"
                           title="Mark as read"
                         >
                           <X size={14} className="text-[hsl(var(--muted-foreground))]" />
@@ -520,6 +523,26 @@ export function TopBar({ onMenuToggle, userName }: TopBarProps) {
               </div>
 
               <div className="border-t mt-1 pt-1 px-2">
+                {hasNative("transfers") && (
+                  <button
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      nativeApp()?.openTransfers?.();
+                    }}
+                    className="flex items-center gap-2 w-full text-left px-2 py-2 text-sm hover:bg-[hsl(var(--accent))] rounded-md transition-colors"
+                  >
+                    <ArrowDownUp size={14} />
+                    Transfers
+                  </button>
+                )}
+                <Link
+                  href="/devices"
+                  onClick={() => setUserMenuOpen(false)}
+                  className="flex items-center gap-2 w-full text-left px-2 py-2 text-sm hover:bg-[hsl(var(--accent))] rounded-md transition-colors"
+                >
+                  <MonitorSmartphone size={14} />
+                  Devices &amp; apps
+                </Link>
                 <button
                   id="topbar-signout"
                   onClick={handleSignOut}
