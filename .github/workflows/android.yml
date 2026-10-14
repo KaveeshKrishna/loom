@@ -77,12 +77,12 @@ jobs:
         run: gradle --no-daemon :app:lintDebug :app:assembleDebug :app:assembleRelease
       - name: Lint report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lint-report
           path: clients/android/app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: loom-android-apk
           path: |
@@ -145,7 +145,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           working-directory: clients/android
           script: bash ../../.github/scripts/android-emulator.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: screens-api${{ matrix.api }}-${{ matrix.profile }}
